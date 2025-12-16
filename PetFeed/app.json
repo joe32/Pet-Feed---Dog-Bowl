@@ -8,6 +8,13 @@
     "scheme": "petfeed",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+
+    "experimental": {
+      "ios": {
+        "nativeTabs": true
+      }
+    },
+
     "ios": {
       "supportsTablet": true
     },
