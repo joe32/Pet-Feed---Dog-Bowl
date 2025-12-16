@@ -38,7 +38,7 @@ export default function AddDeviceScreen() {
       stopScan();
       setScanning(false);
       setTimedOut(true);
-    }, 15000);
+    }, 10000);
   }
 
   return (
