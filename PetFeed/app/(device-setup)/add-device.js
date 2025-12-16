@@ -1,11 +1,14 @@
 import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
 import { useColorScheme } from "react-native";
+import { useState } from "react";
 import { Colors } from "../../constants/theme";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { ActivityIndicator } from "react-native";
 
 export default function AddDeviceScreen() {
   const scheme = useColorScheme() ?? "light";
   const colors = Colors[scheme];
+  const [scanning, setScanning] = useState(false);
 
   return (
     <SafeAreaView
@@ -26,18 +29,33 @@ export default function AddDeviceScreen() {
         <TouchableOpacity
           style={[
             styles.button,
-            { backgroundColor: colors.tint },
+            { backgroundColor: colors.tint, opacity: scanning ? 0.6 : 1 },
           ]}
-          onPress={() => {}}
+          onPress={() => setScanning(true)}
+          disabled={scanning}
         >
-          <Text
-            style={[
-              styles.buttonText,
-              { color: colors.background },
-            ]}
-          >
-            Start scanning
-          </Text>
+          {scanning ? (
+            <View style={styles.scanningRow}>
+              <Text
+                style={[
+                  styles.buttonText,
+                  { color: colors.background, marginRight: 10 },
+                ]}
+              >
+                Scanning
+              </Text>
+              <ActivityIndicator color={colors.background} />
+            </View>
+          ) : (
+            <Text
+              style={[
+                styles.buttonText,
+                { color: colors.background },
+              ]}
+            >
+              Start scanning
+            </Text>
+          )}
         </TouchableOpacity>
       </View>
     </SafeAreaView>
@@ -73,5 +91,9 @@ const styles = StyleSheet.create({
   buttonText: {
     fontSize: 16,
     fontWeight: "600",
+  },
+  scanningRow: {
+    flexDirection: "row",
+    alignItems: "center",
   },
 });

@@ -8,15 +8,14 @@
     "scheme": "petfeed",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-
     "experimental": {
       "ios": {
         "nativeTabs": true
       }
     },
-
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.joewilson.PetFeed"
     },
     "android": {
       "adaptiveIcon": {
@@ -26,7 +25,13 @@
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_ADMIN",
+        "android.permission.BLUETOOTH_CONNECT"
+      ],
+      "package": "com.joewilson.PetFeed"
     },
     "web": {
       "output": "static",
@@ -45,7 +50,8 @@
             "backgroundColor": "#000000"
           }
         }
-      ]
+      ],
+      "react-native-ble-plx"
     ],
     "experiments": {
       "typedRoutes": true,
