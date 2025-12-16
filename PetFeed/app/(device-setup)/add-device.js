@@ -33,11 +33,12 @@ export default function AddDeviceScreen() {
       }
     );
 
+    // This is the final timeout; devices are shown live as discovered.
     timeoutRef.current = setTimeout(() => {
       stopScan();
       setScanning(false);
       setTimedOut(true);
-    }, 10000);
+    }, 15000);
   }
 
   return (
