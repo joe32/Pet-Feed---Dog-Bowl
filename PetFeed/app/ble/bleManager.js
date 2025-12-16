@@ -36,9 +36,40 @@ export function stopScan() {
 export async function connectToDevice(deviceId) {
   const ble = getBleManager();
 
+  // 1. Connect
   const device = await ble.connectToDevice(deviceId, { autoConnect: false });
+
+  // 2. Discover services
   await device.discoverAllServicesAndCharacteristics();
-  return device;
+
+  // 3. Write PAIR command
+  await device.writeCharacteristicWithResponseForService(
+    SERVICE_UUID,
+    CHARACTERISTIC_UUID,
+    Buffer.from("PAIR").toString("base64")
+  );
+
+  // 4. Wait for ACK
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      reject(new Error("Pairing timeout"));
+    }, 5000);
+
+    device.monitorCharacteristicForService(
+      SERVICE_UUID,
+      CHARACTERISTIC_UUID,
+      (error, characteristic) => {
+        if (error || !characteristic?.value) return;
+
+        const value = Buffer.from(characteristic.value, "base64").toString("utf8");
+
+        if (value === "ACK") {
+          clearTimeout(timeout);
+          resolve(device);
+        }
+      }
+    );
+  });
 }
 
 export async function pairWithDevice(deviceId) {
