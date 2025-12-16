@@ -4,7 +4,7 @@ import { useState, useRef } from "react";
 import { Colors } from "../../constants/theme";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ActivityIndicator } from "react-native";
-import { startScan, stopScan } from "../ble/bleManager";
+import { startScan, stopScan, connectToDevice } from "../ble/bleManager";
 
 export default function AddDeviceScreen() {
   const scheme = useColorScheme() ?? "light";
@@ -17,12 +17,18 @@ export default function AddDeviceScreen() {
   const timeoutRef = useRef(null);
 
 async function beginScan() {
+    // Ensure any previous scan is fully stopped
+    stopScan();
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+
     setDevices([]);
     setTimedOut(false);
     setScanning(true);
 
-    // iOS BLE fix: wait briefly for Bluetooth to fully power on
-    // (first scan after permission prompt otherwise returns no results)
+    // iOS BLE warm-up: first scan after permissions often returns empty
     await new Promise((resolve) => setTimeout(resolve, 500));
 
     startScan(
@@ -109,7 +115,20 @@ async function beginScan() {
                 <Text style={[styles.deviceName, { color: colors.text }]}>
                   {item.name || "Unknown device"}
                 </Text>
-                <TouchableOpacity style={[styles.connectButton, { borderColor: colors.tint }]}>
+                <TouchableOpacity
+                  style={[styles.connectButton, { borderColor: colors.tint }]}
+                  onPress={async () => {
+                    try {
+                      setScanning(true);
+                      await connectToDevice(item.id);
+                      stopScan();
+                      setScanning(false);
+                    } catch (e) {
+                      console.log("Connect failed:", e);
+                      setScanning(false);
+                    }
+                  }}
+                >
                   <Text style={[styles.connectText, { color: colors.tint }]}>
                     Connect
                   </Text>
