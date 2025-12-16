@@ -8,6 +8,7 @@
 #include <BLEDevice.h>
 #include <BLEUtils.h>
 #include <BLEServer.h>
+#include <BLE2902.h>
 
 // UUIDs (DO NOT CHANGE – app depends on these)
 #define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
@@ -97,6 +98,7 @@ void setup() {
     BLECharacteristic::PROPERTY_WRITE |
     BLECharacteristic::PROPERTY_NOTIFY
   );
+  pCharacteristic->addDescriptor(new BLE2902());
 
   pCharacteristic->setCallbacks(new CharacteristicCallbacks());
   pCharacteristic->setValue("READY");

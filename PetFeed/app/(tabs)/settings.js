@@ -73,7 +73,7 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
   section: {
     width: "100%",
-    paddingHorizontal: 16,
+    paddingHorizontal: 24,
     paddingTop: 12,
   },
   title: {

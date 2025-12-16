@@ -63,15 +63,8 @@ export async function connectToDevice(deviceId) {
     throw new Error("Characteristic not found");
   }
 
-  // 4. Send PAIR command
-  await device.writeCharacteristicWithResponseForService(
-    SERVICE_UUID,
-    CHARACTERISTIC_UUID,
-    Buffer.from("PAIR").toString("base64")
-  );
-
-  // 5. Wait for ACK response
-  return new Promise((resolve, reject) => {
+  // 4. Start listening for ACK BEFORE writing (required on iOS)
+  return new Promise(async (resolve, reject) => {
     const timeout = setTimeout(() => {
       reject(new Error("Pairing timeout"));
     }, 5000);
@@ -89,6 +82,16 @@ export async function connectToDevice(deviceId) {
           resolve(device);
         }
       }
+    );
+
+    // Small delay to ensure subscription is active
+    await new Promise(r => setTimeout(r, 200));
+
+    // 5. Send PAIR command AFTER subscribing
+    await device.writeCharacteristicWithResponseForService(
+      SERVICE_UUID,
+      CHARACTERISTIC_UUID,
+      Buffer.from("PAIR").toString("base64")
     );
   });
 }
