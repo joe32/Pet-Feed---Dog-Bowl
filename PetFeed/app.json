@@ -47,10 +47,6 @@
         }
       ],
       "react-native-ble-plx"
-    ],
-    "experiments": {
-      "typedRoutes": true,
-      "reactCompiler": true
-    }
+    ]
   }
 }
