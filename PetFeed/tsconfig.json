@@ -1,17 +1,22 @@
 {
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
-    "strict": false,
+    "strict": true,
     "paths": {
-      "@/*": [
-        "./*"
-      ]
-    }
+      "@/*": ["./*"]
+    },
+    "types": []
   },
   "include": [
     "**/*.ts",
     "**/*.tsx",
     ".expo/types/**/*.ts",
     "expo-env.d.ts"
-, "app/(tabs)/devices.js", "app/(tabs)/index.js", "app/(tabs)/_layout.js", "app/_layout.js", "constants/theme.js"  ]
+  ],
+  "exclude": [
+    "**/*.js",
+    "node_modules",
+    "babel.config.js",
+    "metro.config.js"
+  ]
 }
