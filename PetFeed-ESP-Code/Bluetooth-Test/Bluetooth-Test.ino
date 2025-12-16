@@ -18,6 +18,25 @@ BLECharacteristic* pCharacteristic = nullptr;
 
 bool deviceConnected = false;
 
+void factoryReset() {
+  Serial.println("🧨 FACTORY RESET STARTED");
+
+  // Disconnect any connected client
+  if (pServer) {
+    pServer->disconnect(0);
+  }
+
+  // Clear characteristic value back to initial state
+  if (pCharacteristic) {
+    pCharacteristic->setValue("READY");
+  }
+
+  // Restart advertising to behave like a brand‑new device
+  BLEDevice::startAdvertising();
+
+  Serial.println("✅ Factory reset complete (pairing cleared)");
+}
+
 // ---- Server callbacks ----
 class ServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer* server) override {
@@ -94,5 +113,17 @@ void setup() {
 }
 
 void loop() {
-  delay(1000);
+  if (Serial.available()) {
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
+
+    if (cmd.equalsIgnoreCase("factory")) {
+      factoryReset();
+    } else {
+      Serial.print("❓ Unknown command: ");
+      Serial.println(cmd);
+    }
+  }
+
+  delay(50);
 }
