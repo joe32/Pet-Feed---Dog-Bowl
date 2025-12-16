@@ -10,7 +10,10 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.joewilson.PetFeed"
+      "bundleIdentifier": "com.joewilson.PetFeed",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -47,6 +50,12 @@
         }
       ],
       "react-native-ble-plx"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "54e2527e-f42b-4dfc-9218-933453609eb2"
+      }
+    }
   }
 }

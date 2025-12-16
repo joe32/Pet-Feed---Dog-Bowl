@@ -4,6 +4,10 @@ build app:
 
 eas build --platform ios
 
+submit:
+
+eas submit --platform ios
+
 
 
 

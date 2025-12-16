@@ -1,14 +1,44 @@
-import { View, Text, TouchableOpacity, StyleSheet } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, FlatList } from "react-native";
 import { useColorScheme } from "react-native";
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { Colors } from "../../constants/theme";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { ActivityIndicator } from "react-native";
+import { startScan, stopScan } from "../ble/bleManager";
 
 export default function AddDeviceScreen() {
   const scheme = useColorScheme() ?? "light";
   const colors = Colors[scheme];
+
   const [scanning, setScanning] = useState(false);
+  const [devices, setDevices] = useState([]);
+  const [timedOut, setTimedOut] = useState(false);
+
+  const timeoutRef = useRef(null);
+
+  function beginScan() {
+    setDevices([]);
+    setTimedOut(false);
+    setScanning(true);
+
+    startScan(
+      (device) => {
+        setDevices((prev) => {
+          if (prev.find((d) => d.id === device.id)) return prev;
+          return [...prev, device];
+        });
+      },
+      (error) => {
+        console.log("BLE scan error:", error);
+      }
+    );
+
+    timeoutRef.current = setTimeout(() => {
+      stopScan();
+      setScanning(false);
+      setTimedOut(true);
+    }, 10000);
+  }
 
   return (
     <SafeAreaView
@@ -31,7 +61,7 @@ export default function AddDeviceScreen() {
             styles.button,
             { backgroundColor: colors.tint, opacity: scanning ? 0.6 : 1 },
           ]}
-          onPress={() => setScanning(true)}
+          onPress={beginScan}
           disabled={scanning}
         >
           {scanning ? (
@@ -57,6 +87,32 @@ export default function AddDeviceScreen() {
             </Text>
           )}
         </TouchableOpacity>
+
+        {!scanning && timedOut && devices.length === 0 && (
+          <Text style={[styles.subtitle, { color: colors.textSecondary, marginTop: 24 }]}>
+            No devices found
+          </Text>
+        )}
+
+        {devices.length > 0 && (
+          <FlatList
+            style={{ marginTop: 24, width: "100%" }}
+            data={devices}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => (
+              <View style={styles.deviceRow}>
+                <Text style={[styles.deviceName, { color: colors.text }]}>
+                  {item.name || "Unknown device"}
+                </Text>
+                <TouchableOpacity style={[styles.connectButton, { borderColor: colors.tint }]}>
+                  <Text style={[styles.connectText, { color: colors.tint }]}>
+                    Connect
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          />
+        )}
       </View>
     </SafeAreaView>
   );
@@ -95,5 +151,26 @@ const styles = StyleSheet.create({
   scanningRow: {
     flexDirection: "row",
     alignItems: "center",
+  },
+  deviceRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderColor: "#00000022",
+  },
+  deviceName: {
+    fontSize: 16,
+  },
+  connectButton: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  connectText: {
+    fontSize: 14,
+    fontWeight: "600",
   },
 });
