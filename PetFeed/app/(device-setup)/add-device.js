@@ -16,10 +16,14 @@ export default function AddDeviceScreen() {
 
   const timeoutRef = useRef(null);
 
-  function beginScan() {
+async function beginScan() {
     setDevices([]);
     setTimedOut(false);
     setScanning(true);
+
+    // iOS BLE fix: wait briefly for Bluetooth to fully power on
+    // (first scan after permission prompt otherwise returns no results)
+    await new Promise((resolve) => setTimeout(resolve, 500));
 
     startScan(
       (device) => {

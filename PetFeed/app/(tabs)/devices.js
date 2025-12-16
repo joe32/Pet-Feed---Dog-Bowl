@@ -22,7 +22,7 @@ export default function DevicesScreen() {
       }}
     >
       <View>
-        <Text style={[styles.title, { color: colors.text }]}>Devices</Text>
+        <Text style={[styles.title, { color: colors.text }]}>My Devices</Text>
       </View>
       <View
         style={{
@@ -66,7 +66,7 @@ export default function DevicesScreen() {
                   fontWeight: "600",
                 }}
               >
-                Add Device
+                Add New Device
               </Text>
             </TouchableOpacity>
           </>
