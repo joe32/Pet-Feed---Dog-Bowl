@@ -1,5 +1,9 @@
 # Welcome to your Expo app 👋
 
+
+eas build --platform ios --auto-submit
+
+
 build app:
 
 eas build --platform ios
