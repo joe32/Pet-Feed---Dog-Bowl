@@ -12,6 +12,11 @@ export default function TabLayout() {
         <Icon sf="macbook.and.iphone" />
         <Label>Devices</Label>
       </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger name="settings">
+        <Icon sf="gearshape" />
+        <Label>Settings</Label>
+      </NativeTabs.Trigger>
     </NativeTabs>
   );
 }
