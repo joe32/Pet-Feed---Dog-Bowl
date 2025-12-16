@@ -9,7 +9,7 @@ export default function TabLayout() {
       </NativeTabs.Trigger>
 
       <NativeTabs.Trigger name="devices">
-        <Icon sf="dot.radiowaves.left.and.right" />
+        <Icon sf="macbook.and.iphone" />
         <Label>Devices</Label>
       </NativeTabs.Trigger>
     </NativeTabs>
