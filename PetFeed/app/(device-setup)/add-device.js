@@ -1,22 +1,40 @@
-import { View, Text, TouchableOpacity, StyleSheet, FlatList } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, Alert } from "react-native";
 import { useColorScheme } from "react-native";
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Colors } from "../../constants/theme";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { ActivityIndicator } from "react-native";
-import { startScan, stopScan, connectToDevice } from "../ble/bleManager";
+import { useRouter } from "expo-router";
+import AsyncStorage from "@react-native-async-storage/async-storage";
+import { startScan, stopScan, connectToDevice, pairWithDevice } from "../ble/bleManager";
+
+const STORAGE_KEY = "PETFEED_DEVICES";
+const LAST_CONNECTED_KEY = "PETFEED_LAST_CONNECTED";
 
 export default function AddDeviceScreen() {
   const scheme = useColorScheme() ?? "light";
   const colors = Colors[scheme];
+  const router = useRouter();
 
   const [scanning, setScanning] = useState(false);
   const [devices, setDevices] = useState([]);
   const [timedOut, setTimedOut] = useState(false);
+  const [connectingId, setConnectingId] = useState(null);
 
   const timeoutRef = useRef(null);
 
-async function beginScan() {
+  useEffect(() => {
+    return () => {
+      stopScan();
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+        timeoutRef.current = null;
+      }
+    };
+  }, []);
+
+  async function beginScan() {
+    if (scanning) return;
+
     // Ensure any previous scan is fully stopped
     stopScan();
     if (timeoutRef.current) {
@@ -49,6 +67,23 @@ async function beginScan() {
       setScanning(false);
       setTimedOut(true);
     }, 10000);
+  }
+
+  async function saveDeviceAndReturn(device) {
+    const name = device?.name || "PetFeed";
+
+    const savedRaw = await AsyncStorage.getItem(STORAGE_KEY);
+    const saved = savedRaw ? JSON.parse(savedRaw) : [];
+
+    const exists = saved.some((d) => d.id === device.id);
+    const updated = exists
+      ? saved.map((d) => (d.id === device.id ? { ...d, name } : d))
+      : [...saved, { id: device.id, name }];
+
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    await AsyncStorage.setItem(LAST_CONNECTED_KEY, device.id);
+
+    router.back();
   }
 
   return (
@@ -116,22 +151,44 @@ async function beginScan() {
                   {item.name || "Unknown device"}
                 </Text>
                 <TouchableOpacity
-                  style={[styles.connectButton, { borderColor: colors.tint }]}
+                  style={[styles.connectButton, { borderColor: colors.tint, opacity: connectingId ? 0.6 : 1 }]}
                   onPress={async () => {
+                    if (connectingId) return;
+
                     try {
-                      setScanning(true);
+                      setConnectingId(item.id);
                       await connectToDevice(item.id);
+                      const paired = await pairWithDevice(item.id);
+                      if (!paired) {
+                        throw new Error("Pairing failed");
+                      }
                       stopScan();
+                      if (timeoutRef.current) {
+                        clearTimeout(timeoutRef.current);
+                        timeoutRef.current = null;
+                      }
                       setScanning(false);
+                      setTimedOut(false);
+                      await saveDeviceAndReturn(item);
                     } catch (e) {
                       console.log("Connect failed:", e);
-                      setScanning(false);
+                      Alert.alert("Couldn’t connect", "Make sure the feeder is on and nearby, then try again.");
+                    } finally {
+                      setConnectingId(null);
                     }
                   }}
+                  disabled={!!connectingId}
                 >
-                  <Text style={[styles.connectText, { color: colors.tint }]}>
-                    Connect
-                  </Text>
+                  {connectingId === item.id ? (
+                    <View style={{ flexDirection: "row", alignItems: "center" }}>
+                      <ActivityIndicator size="small" color={colors.tint} />
+                      <Text style={[styles.connectText, { color: colors.tint, marginLeft: 8 }]}>
+                        Connecting
+                      </Text>
+                    </View>
+                  ) : (
+                    <Text style={[styles.connectText, { color: colors.tint }]}>Connect</Text>
+                  )}
                 </TouchableOpacity>
               </View>
             )}
