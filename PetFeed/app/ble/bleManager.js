@@ -15,16 +15,20 @@ export function getBleManager() {
 export function startScan(onDeviceFound, onError) {
   const ble = getBleManager();
 
-  ble.startDeviceScan(null, { allowDuplicates: false }, (error, device) => {
-    if (error) {
-      if (onError) onError(error);
-      return;
-    }
+  ble.startDeviceScan(
+    ["4fafc201-1fb5-459e-8fcc-c5c9c331914b"], // 👈 FILTER HERE
+    { allowDuplicates: false },
+    (error, device) => {
+      if (error) {
+        if (onError) onError(error);
+        return;
+      }
 
-    if (device && device.id) {
-      onDeviceFound(device);
+      if (device && device.id) {
+        onDeviceFound(device);
+      }
     }
-  });
+  );
 }
 
 export function stopScan() {
@@ -36,20 +40,37 @@ export function stopScan() {
 export async function connectToDevice(deviceId) {
   const ble = getBleManager();
 
-  // 1. Connect
+  // 1. Connect to device
   const device = await ble.connectToDevice(deviceId, { autoConnect: false });
 
-  // 2. Discover services
+  // 2. REQUIRED on iOS: discover services & characteristics
   await device.discoverAllServicesAndCharacteristics();
 
-  // 3. Write PAIR command
+  // 3. Ensure service & characteristic exist (prevents iOS auto-disconnect)
+  const services = await device.services();
+  const service = services.find(s => s.uuid.toLowerCase() === SERVICE_UUID);
+
+  if (!service) {
+    throw new Error("Service not found");
+  }
+
+  const characteristics = await service.characteristics();
+  const characteristic = characteristics.find(
+    c => c.uuid.toLowerCase() === CHARACTERISTIC_UUID
+  );
+
+  if (!characteristic) {
+    throw new Error("Characteristic not found");
+  }
+
+  // 4. Send PAIR command
   await device.writeCharacteristicWithResponseForService(
     SERVICE_UUID,
     CHARACTERISTIC_UUID,
     Buffer.from("PAIR").toString("base64")
   );
 
-  // 4. Wait for ACK
+  // 5. Wait for ACK response
   return new Promise((resolve, reject) => {
     const timeout = setTimeout(() => {
       reject(new Error("Pairing timeout"));
@@ -58,10 +79,10 @@ export async function connectToDevice(deviceId) {
     device.monitorCharacteristicForService(
       SERVICE_UUID,
       CHARACTERISTIC_UUID,
-      (error, characteristic) => {
-        if (error || !characteristic?.value) return;
+      (error, char) => {
+        if (error || !char?.value) return;
 
-        const value = Buffer.from(characteristic.value, "base64").toString("utf8");
+        const value = Buffer.from(char.value, "base64").toString("utf8");
 
         if (value === "ACK") {
           clearTimeout(timeout);

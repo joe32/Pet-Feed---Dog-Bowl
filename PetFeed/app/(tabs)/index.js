@@ -24,6 +24,7 @@ export default function HomeScreen() {
 }
 const styles = StyleSheet.create({
   title: {
+    paddingTop: 12,
     fontSize: 32,
     fontWeight: "600",
   },

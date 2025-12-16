@@ -26,15 +26,20 @@ void factoryReset() {
     pServer->disconnect(0);
   }
 
-  // Clear characteristic value back to initial state
+  // Reset characteristic value
   if (pCharacteristic) {
     pCharacteristic->setValue("READY");
   }
 
-  // Restart advertising to behave like a brand‑new device
-  BLEDevice::startAdvertising();
+  // Fully restart advertising so iOS can rediscover the device
+  BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
+  if (pAdvertising) {
+    pAdvertising->stop();
+    delay(200);
+    pAdvertising->start();
+  }
 
-  Serial.println("✅ Factory reset complete (pairing cleared)");
+  Serial.println("✅ Factory reset complete (advertising restarted)");
 }
 
 // ---- Server callbacks ----

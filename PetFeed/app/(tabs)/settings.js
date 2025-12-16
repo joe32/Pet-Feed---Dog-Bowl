@@ -74,7 +74,7 @@ const styles = StyleSheet.create({
   section: {
     width: "100%",
     paddingHorizontal: 16,
-    paddingTop: 16,
+    paddingTop: 12,
   },
   title: {
     fontSize: 32,
