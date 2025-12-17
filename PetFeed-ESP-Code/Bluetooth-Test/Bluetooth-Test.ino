@@ -1,8 +1,10 @@
 /*
-  PetFeed BLE pairing sketch
-  - iOS compatible
-  - Pair handshake: APP sends "PAIR" → ESP replies "ACK"
-  - Ready to integrate into feeder firmware later
+  PetFeed firmware
+  - BLE pairing
+  - Wi-Fi provisioning
+  - HTTP control (OPEN / CLOSE)
+  - Servo + buzzer
+  - Time sync (UK)
 */
 
 #include <BLEDevice.h>
@@ -12,155 +14,242 @@
 #include <Preferences.h>
 #include <WiFi.h>
 #include <WebServer.h>
+#include <ESP32Servo.h>
+#include <time.h>
+#include <ArduinoJson.h>
 
-// UUIDs (DO NOT CHANGE – app depends on these)
+// ================= BLE =================
 #define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 #define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 
 BLEServer* pServer = nullptr;
 BLECharacteristic* pCharacteristic = nullptr;
-
 bool deviceConnected = false;
 
+// ================= STORAGE =================
 Preferences prefs;
-WebServer server(80);
 
+// ================= WIFI / HTTP =================
+WebServer server(80);
 String wifiSSID = "";
 String wifiPASS = "";
-String deviceMode = "ble"; // "ble" or "wifi"
+String deviceMode = "ble";
 
+// ================= TIME =================
+unsigned long lastTimePrint = 0;
+const unsigned long TIME_PRINT_INTERVAL = 10000;
+
+void setUKTimezone() {
+  setenv("TZ", "GMT0BST,M3.5.0/1,M10.5.0/2", 1);
+  tzset();
+}
+
+// ================= SERVO =================
+Servo myServo;
+const int servoPin = 6;   // KEEP GPIO 6
+const int LID_OPEN = 0;
+const int LID_CLOSED = 120;
+
+bool lidIsOpen = false;
+int currentAngle = LID_CLOSED;
+
+// ================= BUZZER =================
+const int buzzerPin = 5;
+const int buzzerChannel = 7;
+const int buzzerResolution = 8;
+
+void toneOn(int freq) {
+  ledcWriteTone(buzzerChannel, freq);
+}
+
+void toneOff() {
+  ledcWriteTone(buzzerChannel, 0);
+}
+
+void beep(int freq, int durationMs) {
+  toneOn(freq);
+  delay(durationMs);
+  toneOff();
+}
+
+void clickBeep() {
+  beep(1800, 40);
+}
+
+void confirmBeep() {
+  beep(1200, 120);
+  delay(80);
+  beep(1600, 160);
+}
+
+// ================= SERVO MOTION =================
+void servoWriteSmooth(int targetAngle) {
+  if (targetAngle == currentAngle) return;
+
+  if (targetAngle < currentAngle) {
+    for (int i = currentAngle; i >= targetAngle; i--) {
+      myServo.write(i);
+      delay(1);
+    }
+  } else {
+    for (int i = currentAngle; i <= targetAngle; i++) {
+      myServo.write(i);
+      delay(5);
+    }
+  }
+  currentAngle = targetAngle;
+}
+
+void moveLidOpen() {
+  if (lidIsOpen) return;
+  Serial.println("🔓 OPEN");
+  myServo.attach(servoPin);
+  servoWriteSmooth(LID_OPEN);
+  delay(300);
+  myServo.detach();
+  lidIsOpen = true;
+  clickBeep();
+}
+
+void moveLidClosed() {
+  if (!lidIsOpen) return;
+  Serial.println("🔒 CLOSE");
+  myServo.attach(servoPin);
+  servoWriteSmooth(LID_CLOSED);
+  delay(300);
+  myServo.detach();
+  lidIsOpen = false;
+  clickBeep();
+}
+
+// ================= FACTORY RESET =================
 void factoryReset() {
-  Serial.println("🧨 FACTORY RESET STARTED");
+  Serial.println("🧨 FACTORY RESET");
 
   prefs.begin("petfeed", false);
   prefs.clear();
   prefs.end();
 
-  // Ensure BLE stack is re-initialized after reset
   BLEDevice::deinit(true);
   delay(200);
-  BLEDevice::init("PetFeeder");
+  BLEDevice::init("PetFeed-Test");
 
   wifiSSID = "";
   wifiPASS = "";
   deviceMode = "ble";
 
-  if (pServer) {
-    pServer->disconnect(0);
-  }
-
   BLEDevice::startAdvertising();
-  deviceMode = "ble";
-
-  Serial.println("✅ Factory reset complete (BLE mode restored)");
 }
 
+// ================= WIFI MODE =================
 void startWifiMode() {
-  Serial.println("📡 Starting Wi-Fi mode");
+  Serial.println("📡 Wi-Fi mode");
 
-  // Fully disable BLE before switching to Wi-Fi
   BLEDevice::deinit(true);
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(wifiSSID.c_str(), wifiPASS.c_str());
 
-  unsigned long startAttempt = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 15000) {
+  unsigned long start = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
     delay(500);
-    yield();
     Serial.print(".");
   }
   Serial.println();
 
   if (WiFi.status() != WL_CONNECTED) {
-    Serial.println("❌ Wi-Fi failed, reverting to BLE mode");
+    Serial.println("❌ Wi-Fi failed");
     factoryReset();
     ESP.restart();
     return;
   }
 
-  Serial.print("✅ Wi-Fi connected, IP: ");
+  Serial.print("✅ IP: ");
   Serial.println(WiFi.localIP());
-  deviceMode = "wifi";
+
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+  delay(1500);
+  setUKTimezone();
 
   server.on("/ping", []() {
-    server.send(
-      200,
-      "application/json",
-      "{\"type\":\"petfeed\",\"model\":\"pf-1\",\"fw\":\"1.0\"}"
-    );
+    server.send(200, "application/json", "{\"type\":\"petfeed\"}");
   });
-  server.on("/hello", []() {
-    Serial.println("Hello");
-    server.send(200, "text/plain", "ok");
+
+  server.on("/command", HTTP_POST, []() {
+    if (!server.hasArg("plain")) {
+      server.send(400, "text/plain", "no body");
+      return;
+    }
+
+    StaticJsonDocument<200> doc;
+    deserializeJson(doc, server.arg("plain"));
+
+    String cmd = doc["command"] | "";
+
+    if (cmd == "OPEN") moveLidOpen();
+    if (cmd == "CLOSE") moveLidClosed();
+
+    server.send(200, "application/json", "{\"status\":\"ok\"}");
   });
+
   server.on("/factory-reset", HTTP_POST, []() {
-    Serial.println("🧨 FACTORY RESET REQUESTED FROM APP");
     server.send(200, "text/plain", "resetting");
     delay(200);
     factoryReset();
     ESP.restart();
   });
-  server.begin();
 
-  Serial.println("🌐 Local HTTP server started");
+  server.begin();
 }
 
-// ---- Server callbacks ----
+// ================= BLE CALLBACKS =================
 class ServerCallbacks : public BLEServerCallbacks {
-  void onConnect(BLEServer* server) override {
+  void onConnect(BLEServer*) override {
     deviceConnected = true;
-    Serial.println("📱 Phone connected");
-    if (pCharacteristic) {
-      pCharacteristic->setValue("CONNECTED");
-      pCharacteristic->notify();
-    }
+    Serial.println("📱 BLE connected");
   }
-
-  void onDisconnect(BLEServer* server) override {
+  void onDisconnect(BLEServer*) override {
     deviceConnected = false;
-    Serial.println("📴 Phone disconnected");
-
+    Serial.println("📴 BLE disconnected");
     BLEDevice::startAdvertising();
   }
 };
 
 class CharacteristicCallbacks : public BLECharacteristicCallbacks {
-  void onWrite(BLECharacteristic* characteristic) override {
-    std::string value = characteristic->getValue();
-    String cmd = String(value.c_str());
+  void onWrite(BLECharacteristic* c) override {
+    String cmd = String(c->getValue().c_str());
 
     if (cmd.startsWith("WIFI:")) {
       int s = cmd.indexOf("ssid=");
       int p = cmd.indexOf(";pass=");
+      wifiSSID = cmd.substring(s + 5, p);
+      wifiPASS = cmd.substring(p + 6);
 
-      if (s >= 0 && p >= 0) {
-        wifiSSID = cmd.substring(s + 5, p);
-        wifiPASS = cmd.substring(p + 6);
+      prefs.begin("petfeed", false);
+      prefs.putString("ssid", wifiSSID);
+      prefs.putString("pass", wifiPASS);
+      prefs.putString("mode", "wifi");
+      prefs.end();
 
-        prefs.begin("petfeed", false);
-        prefs.putString("ssid", wifiSSID);
-        prefs.putString("pass", wifiPASS);
-        prefs.putString("mode", "wifi");
-        prefs.end();
-
-        characteristic->setValue("WIFI_SAVED");
-        characteristic->notify();
-
-        Serial.println("💾 Wi-Fi credentials saved, rebooting");
-        Serial.println(wifiSSID);
-        Serial.println(wifiPASS);
-        delay(300);
-        ESP.restart();
-      }
+      c->setValue("WIFI_SAVED");
+      c->notify();
+      confirmBeep();
+      ESP.restart();
     }
   }
 };
 
+// ================= SETUP =================
 void setup() {
   Serial.begin(115200);
   delay(1000);
-  Serial.println("🔁 Booting PetFeed firmware");
+
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, LOW);
+
+  ledcSetup(buzzerChannel, 2000, buzzerResolution);
+  ledcAttachPin(buzzerPin, buzzerChannel);
+  toneOff();
 
   prefs.begin("petfeed", true);
   deviceMode = prefs.getString("mode", "ble");
@@ -168,21 +257,17 @@ void setup() {
   wifiPASS = prefs.getString("pass", "");
   prefs.end();
 
-  if (deviceMode == "wifi" && wifiSSID.length() > 0) {
+  if (deviceMode == "wifi" && wifiSSID.length()) {
     startWifiMode();
     return;
   }
 
-  Serial.println("🔵 Starting PetFeed BLE pairing");
-
   BLEDevice::init("PetFeed-Test");
-
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new ServerCallbacks());
 
-  BLEService* pService = pServer->createService(SERVICE_UUID);
-
-  pCharacteristic = pService->createCharacteristic(
+  BLEService* service = pServer->createService(SERVICE_UUID);
+  pCharacteristic = service->createCharacteristic(
     CHARACTERISTIC_UUID,
     BLECharacteristic::PROPERTY_READ |
     BLECharacteristic::PROPERTY_WRITE |
@@ -190,39 +275,37 @@ void setup() {
   );
   pCharacteristic->addDescriptor(new BLE2902());
   pCharacteristic->setCallbacks(new CharacteristicCallbacks());
+  pCharacteristic->setValue("READY");/Users/joewilson/Documents/Pet Feed - Dog Bowl/PetFeed-ESP-Code/PetFeed-ESP-Code.ino
 
-  pCharacteristic->setValue("READY");
-
-  pService->start();
-
-  BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
-  pAdvertising->addServiceUUID(SERVICE_UUID);
-  pAdvertising->setScanResponse(true);
-
-  // Required for stable iOS connections
-  pAdvertising->setMinPreferred(0x06);
-  pAdvertising->setMinPreferred(0x12);
-
+  service->start();
+  BLEDevice::getAdvertising()->addServiceUUID(SERVICE_UUID);
   BLEDevice::startAdvertising();
 
-  Serial.println("✅ Advertising as PetFeed-Test");
-  Serial.println("👉 Waiting for app pairing");
+  Serial.println("🔵 BLE pairing ready");
 }
 
+// ================= LOOP =================
 void loop() {
-  // Always allow serial factory reset, regardless of mode
   if (Serial.available()) {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim();
 
-    if (cmd.equalsIgnoreCase("factory")) {
+    if (cmd == "open") moveLidOpen();
+    if (cmd == "close") moveLidClosed();
+    if (cmd == "factory") {
       factoryReset();
       ESP.restart();
-      return;
     }
   }
 
-  // If running in Wi‑Fi mode, keep HTTP server alive
+  if (deviceMode == "wifi" && millis() - lastTimePrint > TIME_PRINT_INTERVAL) {
+    lastTimePrint = millis();
+    struct tm t;
+    if (getLocalTime(&t)) {
+      Serial.printf("⏰ Time: %02d:%02d:%02d\n", t.tm_hour, t.tm_min, t.tm_sec);
+    }
+  }
+
   if (deviceMode == "wifi") {
     server.handleClient();
   }

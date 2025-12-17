@@ -1,55 +1,60 @@
+/*
+  PetFeed firmware
+  - BLE pairing
+  - Wi-Fi provisioning
+  - HTTP control (OPEN / CLOSE)
+  - Servo + buzzer
+  - Time sync (UK)
+*/
+
+#include <BLEDevice.h>
+#include <BLEUtils.h>
+#include <BLEServer.h>
+#include <BLE2902.h>
+#include <Preferences.h>
 #include <WiFi.h>
-#include <ESPAsyncWebServer.h>
-#include <ArduinoOTA.h>
-#include <ESPmDNS.h>
+#include <WebServer.h>
 #include <ESP32Servo.h>
 #include <time.h>
-#include "index_html.h"
+#include <ArduinoJson.h>
 
-const char *ssids[] = {
-  "VAST-SW",
-  "Joes-Phone",
-  // "Midges"
-};
+// ================= BLE =================
+#define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 
-const char *passwords[] = {
-  "thewilsons",
-  "12345678",
-  // "00000099"
-};
+BLEServer* pServer = nullptr;
+BLECharacteristic* pCharacteristic = nullptr;
+bool deviceConnected = false;
 
-const int wifiCount = 3;
+// ================= STORAGE =================
+Preferences prefs;
 
-AsyncWebServer server(80);
-Servo myServo;
-const int servoPin = 6;   // NOTE: GPIO6 is typically used by ESP32 flash
-const int buzzerPin = 5;  // PASSIVE buzzer
+// ================= WIFI / HTTP =================
+WebServer server(80);
+String wifiSSID = "";
+String wifiPASS = "";
+String deviceMode = "ble";
 
-// ---- LID POSITIONS ----
-const int LID_CLOSED = 120;
-const int LID_OPEN = 0;
-// -----------------------
-
-String scheduledTime = "";
+// ================= TIME =================
 unsigned long lastTimePrint = 0;
-const unsigned long printInterval = 10000;
+const unsigned long TIME_PRINT_INTERVAL = 10000;
 
-// ---- SERVO STATE (SINGLE SOURCE OF TRUTH) ----
-bool lidIsOpen;
-int currentAngle = LID_CLOSED;  // <-- SYNC WITH REALITY
-// ---------------------------------------------
-
-const int servoMoveDelay = 5;  // closing
-const int downDelay = 1;       // opening
-
-// ---- UK timezone helper (BST/GMT auto-switch) ----
 void setUKTimezone() {
   setenv("TZ", "GMT0BST,M3.5.0/1,M10.5.0/2", 1);
   tzset();
 }
-// --------------------------------------------------
 
-// ---- PASSIVE BUZZER (PWM) ----
+// ================= SERVO =================
+Servo myServo;
+const int servoPin = 6;   // KEEP GPIO 6
+const int LID_OPEN = 0;
+const int LID_CLOSED = 120;
+
+bool lidIsOpen = false;
+int currentAngle = LID_CLOSED;
+
+// ================= BUZZER =================
+const int buzzerPin = 5;
 const int buzzerChannel = 7;
 const int buzzerResolution = 8;
 
@@ -67,109 +72,177 @@ void beep(int freq, int durationMs) {
   toneOff();
 }
 
-// ---- Sound patterns ----
+void clickBeep() {
+  beep(1800, 40);
+}
+
 void confirmBeep() {
   beep(1200, 120);
   delay(80);
   beep(1600, 160);
 }
 
-void cancelBeep() {
-  beep(1600, 120);
-  delay(60);
-  beep(900, 220);
-}
-
-void clickBeep() {
-  beep(1800, 40);
-}
-
-void feedingBeep() {
-  for (int i = 0; i < 3; i++) {
-    beep(900, 450);
-    delay(250);
-  }
-}
-// -------------------------
-
-// ---- STATUS LED ----
-void updateStatusLED() {
-  digitalWrite(LED_BUILTIN, scheduledTime.length() > 0 ? HIGH : LOW);
-}
-// --------------------
-
-// ---- SERVO MOTION (ONLY CALLED WHEN STATE CHANGES) ----
+// ================= SERVO MOTION =================
 void servoWriteSmooth(int targetAngle) {
-
   if (targetAngle == currentAngle) return;
 
-  if (targetAngle < currentAngle) {  // OPENING
+  if (targetAngle < currentAngle) {
     for (int i = currentAngle; i >= targetAngle; i--) {
       myServo.write(i);
-      delay(downDelay);
+      delay(1);
     }
-  } else {  // CLOSING
+  } else {
     for (int i = currentAngle; i <= targetAngle; i++) {
       myServo.write(i);
-      delay(servoMoveDelay);
+      delay(5);
     }
   }
-
   currentAngle = targetAngle;
 }
 
 void moveLidOpen() {
   if (lidIsOpen) return;
+  Serial.println("🔓 OPEN");
   myServo.attach(servoPin);
   servoWriteSmooth(LID_OPEN);
   delay(300);
   myServo.detach();
   lidIsOpen = true;
+  clickBeep();
 }
 
 void moveLidClosed() {
   if (!lidIsOpen) return;
+  Serial.println("🔒 CLOSE");
   myServo.attach(servoPin);
   servoWriteSmooth(LID_CLOSED);
   delay(300);
   myServo.detach();
   lidIsOpen = false;
+  clickBeep();
 }
-// -----------------------------------------------------
 
-void connectWiFi() {
+// ================= FACTORY RESET =================
+void factoryReset() {
+  Serial.println("🧨 FACTORY RESET");
+
+  prefs.begin("petfeed", false);
+  prefs.clear();
+  prefs.end();
+
+  BLEDevice::deinit(true);
+  delay(200);
+  BLEDevice::init("PetFeed");
+
+  wifiSSID = "";
+  wifiPASS = "";
+  deviceMode = "ble";
+
+  BLEDevice::startAdvertising();
+}
+
+// ================= WIFI MODE =================
+void startWifiMode() {
+  Serial.println("📡 Wi-Fi mode");
+
+  BLEDevice::deinit(true);
+
   WiFi.mode(WIFI_STA);
-  WiFi.setHostname("dog");
+  WiFi.begin(wifiSSID.c_str(), wifiPASS.c_str());
 
-  for (int i = 0; i < wifiCount; i++) {
-    WiFi.begin(ssids[i], passwords[i]);
+  unsigned long start = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println();
 
-    int attempt = 0;
-    while (WiFi.status() != WL_CONNECTED && attempt < 15) {
-      delay(1000);
-      attempt++;
-    }
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("❌ Wi-Fi failed");
+    factoryReset();
+    ESP.restart();
+    return;
+  }
 
-    if (WiFi.status() == WL_CONNECTED) {
-      if (!MDNS.begin("dog")) return;
-      MDNS.addService("http", "tcp", 80);
+  Serial.print("✅ IP: ");
+  Serial.println(WiFi.localIP());
 
-      ArduinoOTA.setHostname("DogFeeder");
-      ArduinoOTA.setPassword("ota");
-      ArduinoOTA.begin();
+  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+  delay(1500);
+  setUKTimezone();
+
+  server.on("/ping", []() {
+    server.send(200, "application/json", "{\"type\":\"petfeed\"}");
+  });
+
+  server.on("/command", HTTP_POST, []() {
+    if (!server.hasArg("plain")) {
+      server.send(400, "text/plain", "no body");
       return;
     }
 
-    WiFi.disconnect(true);
-    delay(1000);
-  }
+    StaticJsonDocument<200> doc;
+    deserializeJson(doc, server.arg("plain"));
 
-  WiFi.mode(WIFI_AP);
-  WiFi.softAP("ESP32_AP");
+    String cmd = doc["command"] | "";
+
+    if (cmd == "OPEN") moveLidOpen();
+    if (cmd == "CLOSE") moveLidClosed();
+
+    server.send(200, "application/json", "{\"status\":\"ok\"}");
+  });
+
+  server.on("/factory-reset", HTTP_POST, []() {
+    server.send(200, "text/plain", "resetting");
+    delay(200);
+    factoryReset();
+    ESP.restart();
+  });
+
+  server.begin();
 }
 
+// ================= BLE CALLBACKS =================
+class ServerCallbacks : public BLEServerCallbacks {
+  void onConnect(BLEServer*) override {
+    deviceConnected = true;
+    Serial.println("📱 BLE connected");
+  }
+  void onDisconnect(BLEServer*) override {
+    deviceConnected = false;
+    Serial.println("📴 BLE disconnected");
+    BLEDevice::startAdvertising();
+  }
+};
+
+class CharacteristicCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic* c) override {
+    String cmd = String(c->getValue().c_str());
+
+    if (cmd.startsWith("WIFI:")) {
+      int s = cmd.indexOf("ssid=");
+      int p = cmd.indexOf(";pass=");
+      wifiSSID = cmd.substring(s + 5, p);
+      wifiPASS = cmd.substring(p + 6);
+
+      prefs.begin("petfeed", false);
+      prefs.putString("ssid", wifiSSID);
+      prefs.putString("pass", wifiPASS);
+      prefs.putString("mode", "wifi");
+      prefs.end();
+
+      c->setValue("WIFI_SAVED");
+      c->notify();
+      confirmBeep();
+      ESP.restart();
+    }
+  }
+};
+
+// ================= SETUP =================
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
+  delay(1000);
 
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LOW);
@@ -178,73 +251,64 @@ void setup() {
   ledcAttachPin(buzzerPin, buzzerChannel);
   toneOff();
 
-  connectWiFi();
+  prefs.begin("petfeed", true);
+  deviceMode = prefs.getString("mode", "ble");
+  wifiSSID = prefs.getString("ssid", "");
+  wifiPASS = prefs.getString("pass", "");
+  prefs.end();
 
-  configTime(0, 0, "pool.ntp.org", "time.nist.gov");
-  delay(2000);
-  setUKTimezone();
-
-  setupWebServer();
-}
-
-void setupWebServer() {
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send_P(200, "text/html", INDEX_HTML);
-  });
-
-  server.on("/activate", HTTP_GET, [](AsyncWebServerRequest *request) {
-    if (request->hasParam("time")) {
-      scheduledTime = request->getParam("time")->value();
-      moveLidClosed();
-      confirmBeep();
-      updateStatusLED();
-    }
-    request->send(200, "text/plain", "Activated");
-  });
-
-  server.on("/manual", HTTP_GET, [](AsyncWebServerRequest *request) {
-    if (request->hasParam("state")) {
-      String state = request->getParam("state")->value();
-
-      if (state == "open") {
-        moveLidOpen();
-        clickBeep();
-      } else if (state == "close") {
-        moveLidClosed();
-        clickBeep();
-      }
-    }
-    request->send(200, "text/plain", "OK");
-  });
-
-  server.on("/cancel", HTTP_GET, [](AsyncWebServerRequest *request) {
-    scheduledTime = "";
-    cancelBeep();
-    updateStatusLED();
-    request->send(200, "text/plain", "Cancelled");
-  });
-
-  server.begin();
-}
-
-void loop() {
-  ArduinoOTA.handle();
-  checkTime();
-}
-
-void checkTime() {
-  if (scheduledTime.length() == 0) return;
-
-  struct tm timeinfo;
-  if (!getLocalTime(&timeinfo)) return;
-
-  char currentTime[6];
-  sprintf(currentTime, "%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
-
-  if (String(currentTime) == scheduledTime) {
-    moveLidOpen();
-    feedingBeep();
-    scheduledTime = "";
-    updateStatusLED();
+  if (deviceMode == "wifi" && wifiSSID.length()) {
+    startWifiMode();
+    return;
   }
+
+  BLEDevice::init("PetFeeder");
+  pServer = BLEDevice::createServer();
+  pServer->setCallbacks(new ServerCallbacks());
+
+  BLEService* service = pServer->createService(SERVICE_UUID);
+  pCharacteristic = service->createCharacteristic(
+    CHARACTERISTIC_UUID,
+    BLECharacteristic::PROPERTY_READ |
+    BLECharacteristic::PROPERTY_WRITE |
+    BLECharacteristic::PROPERTY_NOTIFY
+  );
+  pCharacteristic->addDescriptor(new BLE2902());
+  pCharacteristic->setCallbacks(new CharacteristicCallbacks());
+  pCharacteristic->setValue("READY");
+
+  service->start();
+  BLEDevice::getAdvertising()->addServiceUUID(SERVICE_UUID);
+  BLEDevice::startAdvertising();
+
+  Serial.println("🔵 BLE pairing ready");
+}
+
+// ================= LOOP =================
+void loop() {
+  if (Serial.available()) {
+    String cmd = Serial.readStringUntil('\n');
+    cmd.trim();
+
+    if (cmd == "open") moveLidOpen();
+    if (cmd == "close") moveLidClosed();
+    if (cmd == "factory") {
+      factoryReset();
+      ESP.restart();
+    }
+  }
+
+  if (deviceMode == "wifi" && millis() - lastTimePrint > TIME_PRINT_INTERVAL) {
+    lastTimePrint = millis();
+    struct tm t;
+    if (getLocalTime(&t)) {
+      Serial.printf("⏰ Time: %02d:%02d:%02d\n", t.tm_hour, t.tm_min, t.tm_sec);
+    }
+  }
+
+  if (deviceMode == "wifi") {
+    server.handleClient();
+  }
+
+  delay(50);
 }
