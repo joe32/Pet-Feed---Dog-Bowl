@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, RefreshControl, ScrollView } from "react-native";
 import { useColorScheme } from "react-native";
 import { Colors } from "../../constants/theme";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -23,6 +23,7 @@ export default function DevicesScreen() {
   const [devices, setDevices] = useState([]);
   const [connectingId, setConnectingId] = useState(null);
   const [connectedId, setConnectedId] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -55,6 +56,12 @@ export default function DevicesScreen() {
     } else {
       setConnectedId(null);
     }
+  }
+
+  async function refreshDevices() {
+    setRefreshing(true);
+    await loadDevices();
+    setRefreshing(false);
   }
 
   async function saveDevices(updated) {
@@ -215,7 +222,16 @@ export default function DevicesScreen() {
         )}
       </View>
 
-      <View style={{ flex: 1, paddingHorizontal: 24 }}>
+      <ScrollView
+        style={{ flex: 1, paddingHorizontal: 24 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={refreshDevices}
+            tintColor={colors.tint}
+          />
+        }
+      >
         {devices.length === 0 ? (
           <View style={styles.empty}>
             <Text style={[styles.title, { color: colors.text, textAlign: "center" }]}>
@@ -236,7 +252,7 @@ export default function DevicesScreen() {
         ) : (
           devices.map(renderDevice)
         )}
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }

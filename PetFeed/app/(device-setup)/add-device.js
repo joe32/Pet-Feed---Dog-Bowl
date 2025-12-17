@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, Alert } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, Alert, TextInput } from "react-native";
 import { useColorScheme } from "react-native";
 import { useState, useRef, useEffect } from "react";
 import { Colors } from "../../constants/theme";
@@ -20,6 +20,11 @@ export default function AddDeviceScreen() {
   const [timedOut, setTimedOut] = useState(false);
   const [connectingId, setConnectingId] = useState(null);
   const [connectedId, setConnectedId] = useState(null);
+
+  const [setupStep, setSetupStep] = useState(null); // null | "name" | "mode"
+  const [pendingDevice, setPendingDevice] = useState(null);
+  const [deviceName, setDeviceName] = useState("");
+  const [connectionMode, setConnectionMode] = useState(null); // "ble" | "wifi" | "cloud"
 
   const timeoutRef = useRef(null);
 
@@ -70,21 +75,23 @@ export default function AddDeviceScreen() {
     }, 5000);
   }
 
-  async function saveDeviceAndReturn(device) {
-    const name = device?.name || "PetFeed";
-
+  async function saveDeviceAndReturn(device, name, mode) {
     const savedRaw = await AsyncStorage.getItem(STORAGE_KEY);
     const saved = savedRaw ? JSON.parse(savedRaw) : [];
 
-    const exists = saved.some((d) => d.id === device.id);
-    const updated = exists
-      ? saved.map((d) => (d.id === device.id ? { ...d, name } : d))
-      : [...saved, { id: device.id, name }];
+    const updated = [
+      ...saved.filter(d => d.id !== device.id),
+      {
+        id: device.id,
+        name,
+        mode,
+      },
+    ];
 
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
     await AsyncStorage.setItem(LAST_CONNECTED_KEY, device.id);
 
-    router.back();
+    router.replace("/devices");
   }
 
   return (
@@ -172,11 +179,9 @@ export default function AddDeviceScreen() {
                       setScanning(false);
                       setTimedOut(false);
                       setConnectedId(item.id);
-
-                      // Persist device and return after brief success state
-                      setTimeout(async () => {
-                        await saveDeviceAndReturn(item);
-                      }, 600);
+                      setPendingDevice(item);
+                      setDeviceName(item.name || "Pet Feeder");
+                      setSetupStep("name");
 
                     } catch (e) {
                       console.log("Connect failed:", e);
@@ -209,6 +214,88 @@ export default function AddDeviceScreen() {
           />
         )}
       </View>
+
+      {setupStep === "name" && (
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modal, { backgroundColor: colors.background }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>
+              Name your feeder
+            </Text>
+
+            <TextInput
+              value={deviceName}
+              onChangeText={setDeviceName}
+              style={[
+                styles.input,
+                { color: colors.text, borderColor: colors.tint },
+              ]}
+            />
+
+            <TouchableOpacity
+              style={[styles.modalButton, { backgroundColor: colors.tint }]}
+              onPress={() => setSetupStep("mode")}
+            >
+              <Text style={{ color: colors.background, fontWeight: "600" }}>
+                Next
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {setupStep === "mode" && (
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modal, { backgroundColor: colors.background }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>
+              Choose connection mode
+            </Text>
+
+            {[
+              { key: "ble", label: "Bluetooth (local)", enabled: true },
+              { key: "wifi", label: "Wi‑Fi (local)", enabled: false },
+              { key: "cloud", label: "Cloud (control from anywhere)", enabled: false },
+            ].map(option => (
+              <TouchableOpacity
+                key={option.key}
+                disabled={!option.enabled}
+                onPress={() => setConnectionMode(option.key)}
+                style={[
+                  styles.modeRow,
+                  {
+                    opacity: option.enabled ? 1 : 0.4,
+                    borderColor:
+                      connectionMode === option.key ? colors.tint : "#00000022",
+                  },
+                ]}
+              >
+                <Text style={{ color: colors.text }}>{option.label}</Text>
+                {connectionMode === option.key && (
+                  <Text style={{ color: colors.tint }}>✓</Text>
+                )}
+              </TouchableOpacity>
+            ))}
+
+            <TouchableOpacity
+              style={[
+                styles.modalButton,
+                {
+                  backgroundColor:
+                    connectionMode === "ble" ? colors.tint : "#999",
+                  marginTop: 12,
+                },
+              ]}
+              disabled={connectionMode !== "ble"}
+              onPress={() =>
+                saveDeviceAndReturn(pendingDevice, deviceName, "Bluetooth (local)")
+              }
+            >
+              <Text style={{ color: colors.background, fontWeight: "600" }}>
+                Finish
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -267,5 +354,46 @@ const styles = StyleSheet.create({
   connectText: {
     fontSize: 14,
     fontWeight: "600",
+  },
+  modalOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "#00000066",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  modal: {
+    width: "90%",
+    borderRadius: 16,
+    padding: 20,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "600",
+    marginBottom: 12,
+  },
+  input: {
+    borderWidth: 1,
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 16,
+  },
+  modalButton: {
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: "center",
+  },
+  modeRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    paddingVertical: 14,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+    borderRadius: 12,
+    marginTop: 10,
   },
 });
