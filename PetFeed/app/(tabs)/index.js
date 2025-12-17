@@ -292,7 +292,7 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: 0,
     right: 0,
-    alignItems: "center",
+    alignItems: "flex-end",
   },
   centerControl: {
     flex: 1,
