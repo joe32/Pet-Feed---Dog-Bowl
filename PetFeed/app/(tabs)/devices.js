@@ -7,7 +7,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Swipeable, GestureHandlerRootView } from "react-native-gesture-handler";
-import { startOnlinePolling, stopOnlinePolling, forceReachabilityRefresh } from "../../lib/petfeedReachability";
+import { startOnlinePolling, stopOnlinePolling, forceReachabilityRefresh } from "../network/petfeedReachability";
 
 const STORAGE_KEY = "PETFEED_DEVICES";
 const ACTIVE_DEVICE_KEY = "PETFEED_ACTIVE_DEVICE";
