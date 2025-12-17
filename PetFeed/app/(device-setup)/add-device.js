@@ -7,6 +7,12 @@ import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { startScan, stopScan, connectToDevice, sendWifiCredentials } from "../ble/bleManager";
 
+// Helper to generate a random hostname
+function generateHostname() {
+  const suffix = Math.floor(10000 + Math.random() * 90000);
+  return `petfeeder-${suffix}`;
+}
+
 const STORAGE_KEY = "PETFEED_DEVICES";
 const LAST_CONNECTED_KEY = "PETFEED_LAST_CONNECTED";
 
@@ -32,6 +38,9 @@ export default function AddDeviceScreen() {
   const [wifiStep, setWifiStep] = useState(false);
   const [ssid, setSsid] = useState("");
   const [password, setPassword] = useState("");
+
+  // Track the generated hostname during setup
+  const [generatedHost, setGeneratedHost] = useState(null);
 
   const timeoutRef = useRef(null);
 
@@ -92,6 +101,8 @@ export default function AddDeviceScreen() {
         id: device.id,
         name,
         mode,
+        host: generatedHost,
+        hostname: `${generatedHost}.local`,
         ...(mode === "Wi‑Fi (local)" && ssidParam ? { ssid: ssidParam } : {}),
       },
     ];
@@ -187,9 +198,11 @@ export default function AddDeviceScreen() {
                       setScanning(false);
                       setTimedOut(false);
                       setConnectedId(item.id);
-                      setPendingDevice(item);
-                      setDeviceName(item.name || "Pet Feeder");
-                      setSetupStep("name");
+                  setPendingDevice(item);
+                  const host = generateHostname();
+                  setGeneratedHost(host);
+                  setDeviceName(item.name || "Pet Feeder");
+                  setSetupStep("name");
 
                     } catch (e) {
                       console.log("Connect failed:", e);
@@ -368,7 +381,9 @@ export default function AddDeviceScreen() {
                   // The ESP reboots immediately after saving, which can cause BLE to drop.
                   // That is expected and should NOT fail setup.
                   try {
-                    await sendWifiCredentials(ssid, password);
+                    await sendWifiCredentials(
+                      `WIFI:ssid=${ssid};pass=${password};host=${generatedHost}`
+                    );
                   } catch (e) {
                     // Ignore BLE errors caused by ESP reboot
                     console.log("BLE ended after Wi‑Fi write (expected):", e);

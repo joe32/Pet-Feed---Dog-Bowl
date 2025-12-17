@@ -1,7 +1,7 @@
-import { View, Text, StyleSheet, TouchableOpacity, Modal, Pressable } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, Modal, Pressable, ScrollView, RefreshControl } from "react-native";
 import { useColorScheme } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useCallback, useState } from "react";
+import { useEffect, useCallback, useState } from "react";
 import { useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Colors } from "../../constants/theme";
@@ -16,6 +16,21 @@ export default function ScheduleScreen() {
   const [devices, setDevices] = useState([]);
   const [currentId, setCurrentId] = useState(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+
+  const [refreshing, setRefreshing] = useState(false);
+
+  async function pingDevice(host) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 2000);
+
+      await fetch(`http://${host}/ping`, { signal: controller.signal });
+      clearTimeout(timeout);
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   useFocusEffect(
     useCallback(() => {
@@ -39,6 +54,30 @@ export default function ScheduleScreen() {
       };
     }, [])
   );
+
+  useEffect(() => {
+    let interval;
+
+    async function checkDevices() {
+      if (devices.length === 0) return;
+
+      const updated = await Promise.all(
+        devices.map(async d => {
+          if (!d.host) return d;
+          const online = await pingDevice(d.host);
+          return { ...d, online };
+        })
+      );
+
+      setDevices(updated);
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    }
+
+    interval = setInterval(checkDevices, 5000);
+    checkDevices();
+
+    return () => clearInterval(interval);
+  }, [devices]);
 
   async function switchDevice(device) {
     setCurrentId(device.id);
@@ -91,7 +130,29 @@ export default function ScheduleScreen() {
       </View>
 
       {/* Body */}
-      <View style={styles.body} />
+      <ScrollView
+        style={{ flex: 1 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={async () => {
+              setRefreshing(true);
+              if (devices.length > 0) {
+                const updated = await Promise.all(
+                  devices.map(async d => {
+                    if (!d.host) return d;
+                    const online = await pingDevice(d.host);
+                    return { ...d, online };
+                  })
+                );
+                setDevices(updated);
+                await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+              }
+              setRefreshing(false);
+            }}
+          />
+        }
+      />
 
       <Modal
         visible={dropdownOpen}

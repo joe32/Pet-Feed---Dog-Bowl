@@ -18,12 +18,12 @@ export default function HomeScreen() {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  async function pingDevice(ip) {
+  async function pingDevice(hostname) {
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 2000);
 
-      await fetch(`http://${ip}/ping`, {
+      await fetch(`http://${hostname}/ping`, {
         signal: controller.signal,
       });
 
@@ -63,8 +63,8 @@ export default function HomeScreen() {
 
       const updatedDevices = await Promise.all(
         devices.map(async device => {
-          if (!device.ip) return device;
-          const isOnline = await pingDevice(device.ip);
+          if (!device.hostname) return device;
+          const isOnline = await pingDevice(device.hostname);
           return { ...device, online: isOnline };
         })
       );
@@ -94,13 +94,13 @@ export default function HomeScreen() {
   const currentDevice = devices.find(d => d.id === currentId);
 
   async function sendCommand(command) {
-    if (!currentDevice || !currentDevice.ip || currentDevice.online !== true) return;
+    if (!currentDevice || !currentDevice.hostname) return;
 
     try {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 3000);
 
-      const res = await fetch(`http://${currentDevice.ip}/command`, {
+      const res = await fetch(`http://${currentDevice.hostname}/command`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ command }),
@@ -117,38 +117,14 @@ export default function HomeScreen() {
     }
   }
 
-  async function sendHello() {
-    if (!currentDevice || !currentDevice.ip || currentDevice.online !== true) return;
-
-    try {
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 3000);
-
-      const res = await fetch(`http://${currentDevice.ip}/hello`, {
-        method: "POST",
-        signal: controller.signal,
-      });
-
-      clearTimeout(timeout);
-
-      if (!res.ok) {
-        throw new Error("Non-200 response");
-      }
-
-      console.log("Hello command sent successfully");
-    } catch (e) {
-      console.log("Send command failed", e);
-    }
-  }
-
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     // Force a full ping cycle
     if (devices.length > 0) {
       const updatedDevices = await Promise.all(
         devices.map(async device => {
-          if (!device.ip) return device;
-          const isOnline = await pingDevice(device.ip);
+          if (!device.hostname) return device;
+          const isOnline = await pingDevice(device.hostname);
           return { ...device, online: isOnline };
         })
       );
@@ -210,16 +186,10 @@ export default function HomeScreen() {
       >
         <View style={styles.controlRow}>
           <TouchableOpacity
-            disabled={!currentDevice || currentDevice.online !== true}
             onPress={() => sendCommand("OPEN")}
             style={[
               styles.controlButton,
-              {
-                backgroundColor:
-                  currentDevice && currentDevice.online === true
-                    ? colors.tint
-                    : colors.icon,
-              },
+              { backgroundColor: colors.tint },
             ]}
           >
             <Text style={{ color: colors.background, fontSize: 18, fontWeight: "600" }}>
@@ -228,16 +198,10 @@ export default function HomeScreen() {
           </TouchableOpacity>
 
           <TouchableOpacity
-            disabled={!currentDevice || currentDevice.online !== true}
             onPress={() => sendCommand("CLOSE")}
             style={[
               styles.controlButton,
-              {
-                backgroundColor:
-                  currentDevice && currentDevice.online === true
-                    ? colors.tint
-                    : colors.icon,
-              },
+              { backgroundColor: colors.tint },
             ]}
           >
             <Text style={{ color: colors.background, fontSize: 18, fontWeight: "600" }}>

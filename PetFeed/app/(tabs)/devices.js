@@ -1,16 +1,27 @@
-import React, { useState } from "react";
-import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, RefreshControl, ScrollView } from "react-native";
+import React, { useEffect, useState, useCallback } from "react";
+import { View, Text, TouchableOpacity, StyleSheet, Alert, RefreshControl, ScrollView } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useColorScheme } from "react-native";
 import { Colors } from "../../constants/theme";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter, useFocusEffect } from "expo-router";
+import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Swipeable, GestureHandlerRootView } from "react-native-gesture-handler";
-import { startOnlinePolling, stopOnlinePolling, forceReachabilityRefresh } from "../network/petfeedReachability";
 
 const STORAGE_KEY = "PETFEED_DEVICES";
 const ACTIVE_DEVICE_KEY = "PETFEED_ACTIVE_DEVICE";
+
+async function pingHost(host) {
+  try {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 2000);
+    const res = await fetch(`http://${host}.local/ping`, { signal: controller.signal });
+    clearTimeout(t);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
 
 export default function DevicesScreen() {
   const router = useRouter();
@@ -21,151 +32,76 @@ export default function DevicesScreen() {
   const [activeDeviceId, setActiveDeviceId] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  useFocusEffect(
-    React.useCallback(() => {
-      (async () => {
-        const saved = await AsyncStorage.getItem(STORAGE_KEY);
-        const active = await AsyncStorage.getItem(ACTIVE_DEVICE_KEY);
-
-        if (!saved || !active) {
-          await loadDevices();
-          return;
-        }
-
-        const parsed = JSON.parse(saved);
-        const activeDevice = parsed.find(d => d.id === active);
-
-        await loadDevices();
-
-        if (
-          activeDevice &&
-          typeof activeDevice.id === "string" &&
-          typeof activeDevice.ip === "string"
-        ) {
-          startOnlinePolling({
-            deviceId: activeDevice.id,
-            ip: activeDevice.ip,
-            intervalMs: 3000,
-            onStatusChange: (online) => {
-              setDevices(prev =>
-                prev.map(d =>
-                  d.id === activeDevice.id ? { ...d, online } : d
-                )
-              );
-            },
-          });
-        }
-      })();
-
-      return () => {
-        if (typeof stopOnlinePolling === "function") {
-          stopOnlinePolling();
-        }
-      };
-    }, [])
-  );
-  
-//fake devices
-//   useFocusEffect(
-//   React.useCallback(() => {
-//     (async () => {
-//       await AsyncStorage.setItem(
-//         "PETFEED_DEVICES",
-//         JSON.stringify([
-//           {
-//             id: "dummy-1",
-//             name: "PetFeed Kitchen",
-//             mode: "wifi",
-//             online: true,
-//           },
-//           {
-//             id: "dummy-2",
-//             name: "PetFeed Garage",
-//             mode: "wifi",
-//             online: true,
-//           },
-//         ])
-//       );
-
-//       await AsyncStorage.setItem("PETFEED_ACTIVE_DEVICE", "dummy-1");
-
-//       loadDevices();
-//     })();
-//   }, [])
-// );
-
-  async function loadDevices() {
+  const loadDevices = useCallback(async () => {
     const saved = await AsyncStorage.getItem(STORAGE_KEY);
     const active = await AsyncStorage.getItem(ACTIVE_DEVICE_KEY);
-
-    const parsed = saved
-      ? JSON.parse(saved).map(d => ({
-          ...d,
-          mode: d.mode || "wifi",
-        }))
-      : [];
-    setDevices(parsed);
+    const parsed = saved ? JSON.parse(saved) : [];
+    const normalised = parsed.map(d => ({
+      ...d,
+      mode: d.mode || "wifi",
+      online: typeof d.online === "boolean" ? d.online : false,
+    }));
+    setDevices(normalised);
     setActiveDeviceId(active);
-  }
+  }, []);
 
-  async function refreshDevices() {
+  useEffect(() => {
+    loadDevices();
+  }, [loadDevices]);
+
+  useEffect(() => {
+    const id = setInterval(async () => {
+      if (devices.length === 0) return;
+      const updated = await Promise.all(
+        devices.map(async d => {
+          if (!d.host) return d;
+          const online = await pingHost(d.host);
+          return { ...d, online };
+        })
+      );
+      setDevices(updated);
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    }, 5000);
+    return () => clearInterval(id);
+  }, [devices]);
+
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    if (typeof forceReachabilityRefresh === "function") {
-      await forceReachabilityRefresh();
-    }
-    await loadDevices();
-    setRefreshing(false);
-  }
-
-  async function saveDevices(updated) {
+    const updated = await Promise.all(
+      devices.map(async d => {
+        if (!d.host) return d;
+        const online = await pingHost(d.host);
+        return { ...d, online };
+      })
+    );
     setDevices(updated);
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-  }
+    setRefreshing(false);
+  }, [devices]);
 
-  async function handleDevicePress(device) {
-    if (activeDeviceId === device.id) return;
-
-    Alert.alert(
-      "Switch device?",
-      `Control "${device.name}" instead?`,
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: "Switch",
-          onPress: async () => {
-            setActiveDeviceId(device.id);
-            await AsyncStorage.setItem(ACTIVE_DEVICE_KEY, device.id);
-          },
-        },
-      ]
-    );
+  async function selectDevice(device) {
+    setActiveDeviceId(device.id);
+    await AsyncStorage.setItem(ACTIVE_DEVICE_KEY, device.id);
   }
 
   async function removeDevice(device) {
     Alert.alert(
       "Remove device?",
-      `Remove "${device.name}" from this app?`,
+      `Remove "${device.name}" and factory reset it?`,
       [
         { text: "Cancel", style: "cancel" },
         {
           text: "Remove",
           style: "destructive",
           onPress: async () => {
-            // Trigger factory reset on ESP (best‑effort)
-            if (device.ip) {
+            if (device.host) {
               try {
-                await fetch(`http://${device.ip}/factory-reset`, {
-                  method: "POST",
-                });
-                console.log("Factory reset requested for device:", device.name);
-              } catch (e) {
-                console.log("Factory reset request failed:", e);
-              }
+                await fetch(`http://${device.host}.local/factory-reset`, { method: "POST" });
+              } catch {}
             }
-
             const updated = devices.filter(d => d.id !== device.id);
-            await saveDevices(updated);
-
+            setDevices(updated);
+            await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
             if (activeDeviceId === device.id) {
               setActiveDeviceId(null);
               await AsyncStorage.removeItem(ACTIVE_DEVICE_KEY);
@@ -176,129 +112,40 @@ export default function DevicesScreen() {
     );
   }
 
-  async function renameDevice(device) {
-    Alert.prompt(
-      "Rename device",
-      "Enter a new name",
-      async (name) => {
-        if (!name) return;
-        const updated = devices.map(d =>
-          d.id === device.id ? { ...d, name } : d
-        );
-        await saveDevices(updated);
-      },
-      "plain-text",
-      device.name
-    );
-  }
-
-  async function updateMode(device, mode) {
-    const updated = devices.map(d =>
-      d.id === device.id ? { ...d, mode } : d
-    );
-    await saveDevices(updated);
-  }
-
-  function renderRightActions(device) {
-    return (
-      <TouchableOpacity
-        style={[styles.rightAction, { backgroundColor: colors.background }]}
-        onPress={() =>
-          Alert.alert("Device options", device.name, [
-            {
-              text: "Switch connection mode",
-              onPress: () =>
-                Alert.alert("Connection mode", "", [
-                  { text: "Wi‑Fi (local)", onPress: async () => updateMode(device, "wifi") },
-                  { text: "Cloud (coming soon)", style: "destructive" },
-                  { text: "Cancel", style: "cancel" },
-                ]),
-            },
-            { text: "Rename", onPress: () => renameDevice(device) },
-            { text: "Remove", style: "destructive", onPress: () => removeDevice(device) },
-            { text: "Cancel", style: "cancel" },
-          ])
-        }
-      >
-        <Text style={{ fontSize: 22, color: colors.textSecondary, padding: 16 }}>⚙︎</Text>
-      </TouchableOpacity>
-    );
-  }
-
-  function renderLeftActions(device) {
-    return (
-      <TouchableOpacity
-        style={[styles.leftAction, { backgroundColor: "#ff3b30", justifyContent: "center", alignItems: "center" }]}
-        onPress={() => removeDevice(device)}
-      >
-        <Text style={{ color: "#fff", fontWeight: "600", padding: 16 }}>Delete</Text>
-      </TouchableOpacity>
-    );
-  }
-
   function renderDevice(device) {
     const isActive = activeDeviceId === device.id;
 
     return (
       <Swipeable
         key={device.id}
-        renderLeftActions={() => renderLeftActions(device)}
-        renderRightActions={() => renderRightActions(device)}
+        renderLeftActions={() => (
+          <TouchableOpacity
+            style={[styles.leftAction, { backgroundColor: "#ff3b30" }]}
+            onPress={() => removeDevice(device)}
+          >
+            <Text style={{ color: "#fff", fontWeight: "600" }}>Delete</Text>
+          </TouchableOpacity>
+        )}
       >
         <TouchableOpacity
-          onPress={() => handleDevicePress(device)}
+          onPress={() => selectDevice(device)}
           style={[styles.card, { backgroundColor: colors.card }]}
         >
           <View style={{ flex: 1 }}>
-            <Text style={[styles.deviceName, { color: colors.text }]}>
-              {device.name}
+            <Text style={[styles.deviceName, { color: colors.text }]}>{device.name}</Text>
+            <Text style={{ color: colors.textSecondary, fontSize: 14 }}>
+              {isActive ? "Selected" : "Not selected"} · {device.online ? "Online" : "Offline"}
             </Text>
-
-            <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
-              <View
-                style={{
-                  width: 8,
-                  height: 8,
-                  borderRadius: 4,
-                  marginRight: 6,
-                  backgroundColor: device.online ? "#3ddc84" : "#777",
-                }}
-              />
-              <Text style={{ color: colors.textSecondary, fontSize: 14 }}>
-                {isActive ? "Selected" : "Not selected"} · {device.online ? "Online" : "Offline"}
-              </Text>
-            </View>
-
             <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 2 }}>
-              Connection: {device.mode === "wifi" ? "Wi‑Fi (local)" : "Cloud"}
+              Connection: Wi‑Fi (local)
             </Text>
           </View>
+
           <View style={styles.inlineActions}>
-            <TouchableOpacity
-              onPress={() =>
-                Alert.alert("Device options", device.name, [
-                  {
-                    text: "Switch connection mode",
-                    onPress: () =>
-                      Alert.alert("Connection mode", "", [
-                        { text: "Wi‑Fi (local)", onPress: async () => updateMode(device, "wifi") },
-                        { text: "Cloud (coming soon)", style: "destructive" },
-                        { text: "Cancel", style: "cancel" },
-                      ]),
-                  },
-                  { text: "Rename", onPress: () => renameDevice(device) },
-                  { text: "Cancel", style: "cancel" },
-                ])
-              }
-              style={{ paddingHorizontal: 8 }}
-            >
+            <TouchableOpacity onPress={() => Alert.alert("Rename coming soon")}>
               <Ionicons name="settings-outline" size={22} color={colors.textSecondary} />
             </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => removeDevice(device)}
-              style={{ paddingHorizontal: 8 }}
-            >
+            <TouchableOpacity onPress={() => removeDevice(device)} style={{ marginLeft: 12 }}>
               <Ionicons name="trash-outline" size={22} color="#ff3b30" />
             </TouchableOpacity>
           </View>
@@ -312,40 +159,20 @@ export default function DevicesScreen() {
       <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
         <View style={styles.header}>
           <Text style={[styles.title, { color: colors.text }]}>My Devices</Text>
-
-          {devices.length > 0 && (
-            <TouchableOpacity onPress={() => router.push("/(device-setup)/add-device")}>
-              <Text style={{ color: colors.tint, fontSize: 16 }}>Add Device +</Text>
-            </TouchableOpacity>
-          )}
+          <TouchableOpacity onPress={() => router.push("/(device-setup)/add-device")}>
+            <Text style={{ color: colors.tint, fontSize: 16 }}>Add Device +</Text>
+          </TouchableOpacity>
         </View>
 
         <ScrollView
           style={{ flex: 1, paddingHorizontal: 24 }}
           refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={refreshDevices}
-              tintColor={colors.tint}
-            />
+            <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.tint} />
           }
         >
           {devices.length === 0 ? (
             <View style={styles.empty}>
-              <Text style={[styles.title, { color: colors.text, textAlign: "center" }]}>
-                No devices
-              </Text>
-              <Text style={{ color: colors.textSecondary, marginVertical: 16, textAlign: "center" }}>
-                Add a pet feeder to get started
-              </Text>
-              <TouchableOpacity
-                onPress={() => router.push("/(device-setup)/add-device")}
-                style={[styles.addButton, { backgroundColor: colors.tint }]}
-              >
-                <Text style={{ color: colors.onPrimary, fontWeight: "600" }}>
-                  Add New Device
-                </Text>
-              </TouchableOpacity>
+              <Text style={[styles.title, { color: colors.text }]}>No devices</Text>
             </View>
           ) : (
             devices.map(renderDevice)
@@ -365,20 +192,8 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
   },
-  title: {
-    fontSize: 32,
-    fontWeight: "600",
-  },
-  empty: {
-    flex: 1,
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  addButton: {
-    paddingHorizontal: 24,
-    paddingVertical: 14,
-    borderRadius: 14,
-  },
+  title: { fontSize: 32, fontWeight: "600" },
+  empty: { flex: 1, alignItems: "center", marginTop: 80 },
   card: {
     padding: 16,
     borderRadius: 16,
@@ -386,21 +201,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
   },
-  deviceName: {
-    fontSize: 18,
-    fontWeight: "600",
-  },
-  rightAction: {
-    justifyContent: "center",
-    alignItems: "center",
-  },
+  deviceName: { fontSize: 18, fontWeight: "600" },
+  inlineActions: { flexDirection: "row", alignItems: "center", marginLeft: 12 },
   leftAction: {
     justifyContent: "center",
     alignItems: "center",
-  },
-  inlineActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    marginLeft: 12,
+    width: 90,
   },
 });

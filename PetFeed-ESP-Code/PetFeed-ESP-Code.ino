@@ -17,6 +17,7 @@
 #include <ESP32Servo.h>
 #include <time.h>
 #include <ArduinoJson.h>
+#include <ESPmDNS.h>
 
 // ================= BLE =================
 #define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
@@ -33,11 +34,12 @@ Preferences prefs;
 WebServer server(80);
 String wifiSSID = "";
 String wifiPASS = "";
+String mdnsHost = "";
 String deviceMode = "ble";
 
 // ================= TIME =================
-unsigned long lastTimePrint = 0;
-const unsigned long TIME_PRINT_INTERVAL = 10000;
+int lastPrintedMinute = -1;
+int lastPrintedHour = -1;
 
 void setUKTimezone() {
   setenv("TZ", "GMT0BST,M3.5.0/1,M10.5.0/2", 1);
@@ -130,9 +132,11 @@ void factoryReset() {
   prefs.clear();
   prefs.end();
 
+  mdnsHost = "";
+
   BLEDevice::deinit(true);
   delay(200);
-  BLEDevice::init("PetFeed");
+  BLEDevice::init("PetFeeder1");
 
   wifiSSID = "";
   wifiPASS = "";
@@ -170,6 +174,19 @@ void startWifiMode() {
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
   delay(1500);
   setUKTimezone();
+
+  if (mdnsHost.length()) {
+    Serial.print("🔧 Starting mDNS with hostname: ");
+    Serial.println(mdnsHost);
+
+    if (MDNS.begin(mdnsHost.c_str())) {
+      Serial.print("🌐 mDNS started successfully: ");
+      Serial.print(mdnsHost);
+      Serial.println(".local");
+    } else {
+      Serial.println("❌ mDNS failed to start");
+    }
+  }
 
   server.on("/ping", []() {
     server.send(200, "application/json", "{\"type\":\"petfeed\"}");
@@ -222,12 +239,17 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks {
     if (cmd.startsWith("WIFI:")) {
       int s = cmd.indexOf("ssid=");
       int p = cmd.indexOf(";pass=");
-      wifiSSID = cmd.substring(s + 5, p);
-      wifiPASS = cmd.substring(p + 6);
+      int h = cmd.indexOf(";host=");
+      if (s >= 0 && p >= 0 && h >= 0) {
+        wifiSSID = cmd.substring(s + 5, p);
+        wifiPASS = cmd.substring(p + 6, h);
+        mdnsHost = cmd.substring(h + 6);
+      }
 
       prefs.begin("petfeed", false);
       prefs.putString("ssid", wifiSSID);
       prefs.putString("pass", wifiPASS);
+      prefs.putString("host", mdnsHost);
       prefs.putString("mode", "wifi");
       prefs.end();
 
@@ -251,10 +273,19 @@ void setup() {
   ledcAttachPin(buzzerPin, buzzerChannel);
   toneOff();
 
+  myServo.attach(servoPin);
+  myServo.write(LID_CLOSED);
+  delay(400);
+  myServo.detach();
+  lidIsOpen = false;
+  currentAngle = LID_CLOSED;
+  Serial.println("🔒 Lid forced closed on startup");
+
   prefs.begin("petfeed", true);
   deviceMode = prefs.getString("mode", "ble");
   wifiSSID = prefs.getString("ssid", "");
   wifiPASS = prefs.getString("pass", "");
+  mdnsHost = prefs.getString("host", "");
   prefs.end();
 
   if (deviceMode == "wifi" && wifiSSID.length()) {
@@ -262,7 +293,7 @@ void setup() {
     return;
   }
 
-  BLEDevice::init("PetFeeder");
+  BLEDevice::init("PetFeeder1");
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new ServerCallbacks());
 
@@ -298,11 +329,15 @@ void loop() {
     }
   }
 
-  if (deviceMode == "wifi" && millis() - lastTimePrint > TIME_PRINT_INTERVAL) {
-    lastTimePrint = millis();
+  // Print time once per minute, exactly at :00 seconds (non-blocking)
+  if (deviceMode == "wifi") {
     struct tm t;
     if (getLocalTime(&t)) {
-      Serial.printf("⏰ Time: %02d:%02d:%02d\n", t.tm_hour, t.tm_min, t.tm_sec);
+      if (t.tm_sec == 0 && (t.tm_min != lastPrintedMinute || t.tm_hour != lastPrintedHour)) {
+        lastPrintedMinute = t.tm_min;
+        lastPrintedHour = t.tm_hour;
+        Serial.printf("⏰ Time: %02d:%02d:%02d\n", t.tm_hour, t.tm_min, t.tm_sec);
+      }
     }
   }
 
