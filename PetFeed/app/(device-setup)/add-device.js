@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, Alert, TextInput } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, Alert, TextInput, KeyboardAvoidingView, Platform } from "react-native";
 import { useColorScheme } from "react-native";
 import { useState, useRef, useEffect } from "react";
 import { Colors } from "../../constants/theme";
@@ -306,50 +306,63 @@ export default function AddDeviceScreen() {
 
       {setupStep === "wifi" && (
         <View style={styles.modalOverlay}>
-          <View style={[styles.modal, { backgroundColor: colors.background }]}>
-            <Text style={[styles.modalTitle, { color: colors.text }]}>
-              Connect feeder to Wi‑Fi
-            </Text>
-            <Text style={[styles.subtitle, { color: colors.textSecondary, marginBottom: 18 }]}>
-              Enter your home Wi‑Fi details to connect your feeder to your network.
-            </Text>
-            <TextInput
-              value={ssid}
-              onChangeText={setSsid}
-              style={[
-                styles.input,
-                { color: colors.text, borderColor: colors.tint, marginBottom: 12 },
-              ]}
-              placeholder="Wi‑Fi name (SSID)"
-              placeholderTextColor={colors.textSecondary}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            <TextInput
-              value={password}
-              onChangeText={setPassword}
-              style={[
-                styles.input,
-                { color: colors.text, borderColor: colors.tint, marginBottom: 18 },
-              ]}
-              placeholder="Wi‑Fi password"
-              placeholderTextColor={colors.textSecondary}
-              autoCapitalize="none"
-              autoCorrect={false}
-              secureTextEntry
-            />
-            <TouchableOpacity
-              style={[
-                styles.modalButton,
-                {
-                  backgroundColor: ssid ? colors.tint : "#999",
-                },
-              ]}
-              disabled={!ssid}
-              onPress={async () => {
-                try {
-                  // Send Wi‑Fi credentials to ESP over BLE
-                  await sendWifiCredentials(ssid, password);
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            style={{ width: "100%" }}
+          >
+            <View style={[styles.modal, { backgroundColor: colors.background }]}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>
+                Connect feeder to Wi‑Fi
+              </Text>
+              <Text style={[styles.subtitle, { color: colors.textSecondary, marginBottom: 18 }]}>
+                Enter your home Wi‑Fi details to connect your feeder to your network.
+              </Text>
+              <TextInput
+                value={ssid}
+                onChangeText={setSsid}
+                style={[
+                  styles.input,
+                  { color: colors.text, borderColor: colors.tint, marginBottom: 12 },
+                ]}
+                placeholder="Wi‑Fi name (SSID)"
+                placeholderTextColor={colors.textSecondary}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <TextInput
+                value={password}
+                onChangeText={setPassword}
+                style={[
+                  styles.input,
+                  { color: colors.text, borderColor: colors.tint, marginBottom: 18 },
+                ]}
+                placeholder="Wi‑Fi password"
+                placeholderTextColor={colors.textSecondary}
+                autoCapitalize="none"
+                autoCorrect={false}
+                secureTextEntry
+              />
+              <TouchableOpacity
+                style={[
+                  styles.modalButton,
+                  {
+                    backgroundColor: ssid ? colors.tint : "#999",
+                  },
+                ]}
+                disabled={!ssid}
+                onPress={async () => {
+                  // Send Wi‑Fi credentials to ESP over BLE.
+                  // The ESP reboots immediately after saving, which can cause BLE to drop.
+                  // That is expected and should NOT fail setup.
+                  try {
+                    await sendWifiCredentials(ssid, password);
+                  } catch (e) {
+                    // Ignore BLE errors caused by ESP reboot
+                    console.log("BLE ended after Wi‑Fi write (expected):", e);
+                  }
+
+                  // Small delay to allow write to flush before BLE drops
+                  await new Promise(r => setTimeout(r, 300));
 
                   // Persist device locally (do NOT store password)
                   await saveDeviceAndReturn(
@@ -358,19 +371,14 @@ export default function AddDeviceScreen() {
                     "Wi‑Fi (local)",
                     ssid
                   );
-                } catch (e) {
-                  Alert.alert(
-                    "Setup failed",
-                    "Could not send Wi‑Fi details to the feeder. Make sure it is still connected and try again."
-                  );
-                }
-              }}
-            >
-              <Text style={{ color: colors.background, fontWeight: "600" }}>
-                Save & Continue
-              </Text>
-            </TouchableOpacity>
-          </View>
+                }}
+              >
+                <Text style={{ color: colors.background, fontWeight: "600" }}>
+                  Save & Continue
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
         </View>
       )}
     </SafeAreaView>

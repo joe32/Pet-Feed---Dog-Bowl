@@ -50,6 +50,7 @@ void factoryReset() {
   }
 
   BLEDevice::startAdvertising();
+  deviceMode = "ble";
 
   Serial.println("✅ Factory reset complete (BLE mode restored)");
 }
@@ -66,6 +67,7 @@ void startWifiMode() {
   unsigned long startAttempt = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 15000) {
     delay(500);
+    yield();
     Serial.print(".");
   }
   Serial.println();
@@ -79,9 +81,14 @@ void startWifiMode() {
 
   Serial.print("✅ Wi-Fi connected, IP: ");
   Serial.println(WiFi.localIP());
+  deviceMode = "wifi";
 
   server.on("/ping", []() {
-    server.send(200, "text/plain", "ok");
+    server.send(
+      200,
+      "application/json",
+      "{\"type\":\"petfeed\",\"model\":\"pf-1\",\"fw\":\"1.0\"}"
+    );
   });
   server.begin();
 
@@ -107,7 +114,43 @@ class ServerCallbacks : public BLEServerCallbacks {
   }
 };
 
+class CharacteristicCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic* characteristic) override {
+    std::string value = characteristic->getValue();
+    String cmd = String(value.c_str());
+
+    if (cmd.startsWith("WIFI:")) {
+      int s = cmd.indexOf("ssid=");
+      int p = cmd.indexOf(";pass=");
+
+      if (s >= 0 && p >= 0) {
+        wifiSSID = cmd.substring(s + 5, p);
+        wifiPASS = cmd.substring(p + 6);
+
+        prefs.begin("petfeed", false);
+        prefs.putString("ssid", wifiSSID);
+        prefs.putString("pass", wifiPASS);
+        prefs.putString("mode", "wifi");
+        prefs.end();
+
+        characteristic->setValue("WIFI_SAVED");
+        characteristic->notify();
+
+        Serial.println("💾 Wi-Fi credentials saved, rebooting");
+        Serial.println(wifiSSID);
+        Serial.println(wifiPASS);
+        delay(300);
+        ESP.restart();
+      }
+    }
+  }
+};
+
 void setup() {
+  Serial.begin(115200);
+  delay(1000);
+  Serial.println("🔁 Booting PetFeed firmware");
+
   prefs.begin("petfeed", true);
   deviceMode = prefs.getString("mode", "ble");
   wifiSSID = prefs.getString("ssid", "");
@@ -118,9 +161,6 @@ void setup() {
     startWifiMode();
     return;
   }
-
-  Serial.begin(115200);
-  delay(1000);
 
   Serial.println("🔵 Starting PetFeed BLE pairing");
 
@@ -138,36 +178,7 @@ void setup() {
     BLECharacteristic::PROPERTY_NOTIFY
   );
   pCharacteristic->addDescriptor(new BLE2902());
-  pCharacteristic->setCallbacks(new BLECharacteristicCallbacks() {
-    void onWrite(BLECharacteristic* characteristic) override {
-      std::string value = characteristic->getValue();
-      String cmd = String(value.c_str());
-
-      if (cmd.startsWith("WIFI:")) {
-        int s = cmd.indexOf("ssid=");
-        int p = cmd.indexOf(";pass=");
-
-        if (s >= 0 && p >= 0) {
-          wifiSSID = cmd.substring(s + 5, p);
-          wifiPASS = cmd.substring(p + 6);
-
-          prefs.begin("petfeed", false);
-          prefs.putString("ssid", wifiSSID);
-          prefs.putString("pass", wifiPASS);
-          prefs.putString("mode", "wifi");
-          prefs.end();
-
-          characteristic->setValue("WIFI_SAVED");
-          characteristic->notify();
-
-          Serial.println("💾 Wi-Fi credentials saved, rebooting");
-          delay(300);
-          delay(500);
-          ESP.restart();
-        }
-      }
-    }
-  });
+  pCharacteristic->setCallbacks(new CharacteristicCallbacks());
 
   pCharacteristic->setValue("READY");
 
@@ -188,11 +199,7 @@ void setup() {
 }
 
 void loop() {
-  if (deviceMode == "wifi") {
-    server.handleClient();
-    return;
-  }
-
+  // Always allow serial factory reset, regardless of mode
   if (Serial.available()) {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim();
@@ -200,7 +207,13 @@ void loop() {
     if (cmd.equalsIgnoreCase("factory")) {
       factoryReset();
       ESP.restart();
+      return;
     }
+  }
+
+  // If running in Wi‑Fi mode, keep HTTP server alive
+  if (deviceMode == "wifi") {
+    server.handleClient();
   }
 
   delay(50);
