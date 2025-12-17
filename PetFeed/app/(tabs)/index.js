@@ -75,6 +75,30 @@ export default function HomeScreen() {
 
   const currentDevice = devices.find(d => d.id === currentId);
 
+  async function sendHello() {
+    if (!currentDevice || !currentDevice.ip) return;
+
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000);
+
+      const res = await fetch(`http://${currentDevice.ip}/hello`, {
+        method: "POST",
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeout);
+
+      if (!res.ok) {
+        throw new Error("Non-200 response");
+      }
+
+      console.log("Hello command sent successfully");
+    } catch (e) {
+      console.log("Send command failed", e);
+    }
+  }
+
   return (
     <SafeAreaView
       style={{
@@ -113,7 +137,7 @@ export default function HomeScreen() {
 
         {/* Center: title (ABSOLUTE) */}
         <View style={styles.centerTitle}>
-          <Text style={[styles.title, { color: colors.text }]}>Home</Text>
+          <Text style={[styles.title, { color: colors.text }]}>Control</Text>
           <Text style={{ color: colors.textSecondary, fontSize: 14, marginTop: 2 }}>
             {currentDevice ? `Connected: ${currentDevice.name}` : "No device connected"}
           </Text>
@@ -121,6 +145,26 @@ export default function HomeScreen() {
 
         {/* Right spacer */}
         <View style={styles.rightSlot} />
+      </View>
+
+      <View style={styles.centerControl}>
+        <TouchableOpacity
+          disabled={!currentDevice || !currentDevice.ip}
+          onPress={sendHello}
+          style={[
+            styles.controlButton,
+            {
+              backgroundColor:
+                currentDevice && currentDevice.ip
+                  ? colors.tint
+                  : colors.icon,
+            },
+          ]}
+        >
+          <Text style={{ color: colors.background, fontSize: 18, fontWeight: "600" }}>
+            Send Test Command
+          </Text>
+        </TouchableOpacity>
       </View>
 
       {/* Dropdown */}
@@ -211,5 +255,15 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     alignItems: "center",
+  },
+  centerControl: {
+    flex: 1,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  controlButton: {
+    paddingHorizontal: 32,
+    paddingVertical: 16,
+    borderRadius: 20,
   },
 });

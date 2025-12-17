@@ -1,11 +1,12 @@
 import React, { useState } from "react";
 import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator, RefreshControl, ScrollView } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useColorScheme } from "react-native";
 import { Colors } from "../../constants/theme";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Swipeable } from "react-native-gesture-handler";
+import { Swipeable, GestureHandlerRootView } from "react-native-gesture-handler";
 
 const STORAGE_KEY = "PETFEED_DEVICES";
 const ACTIVE_DEVICE_KEY = "PETFEED_ACTIVE_DEVICE";
@@ -24,25 +25,52 @@ export default function DevicesScreen() {
       loadDevices();
     }, [])
   );
+  
+//fake devices
+//   useFocusEffect(
+//   React.useCallback(() => {
+//     (async () => {
+//       await AsyncStorage.setItem(
+//         "PETFEED_DEVICES",
+//         JSON.stringify([
+//           {
+//             id: "dummy-1",
+//             name: "PetFeed Kitchen",
+//             mode: "wifi",
+//             online: true,
+//           },
+//           {
+//             id: "dummy-2",
+//             name: "PetFeed Garage",
+//             mode: "wifi",
+//             online: true,
+//           },
+//         ])
+//       );
+
+//       await AsyncStorage.setItem("PETFEED_ACTIVE_DEVICE", "dummy-1");
+
+//       loadDevices();
+//     })();
+//   }, [])
+// );
 
   async function loadDevices() {
     const saved = await AsyncStorage.getItem(STORAGE_KEY);
     const active = await AsyncStorage.getItem(ACTIVE_DEVICE_KEY);
 
-    const parsed = saved ? JSON.parse(saved) : [];
+    const parsed = saved
+      ? JSON.parse(saved).map(d => ({
+          ...d,
+          mode: d.mode || "wifi",
+        }))
+      : [];
     setDevices(parsed);
     setActiveDeviceId(active);
   }
 
   async function refreshDevices() {
     setRefreshing(true);
-
-    const updated = devices.map(d => ({
-      ...d,
-      online: Math.random() > 0.3 // TEMP: simulate reachability
-    }));
-
-    await saveDevices(updated);
     setRefreshing(false);
   }
 
@@ -127,7 +155,7 @@ export default function DevicesScreen() {
               onPress: () =>
                 Alert.alert("Connection mode", "", [
                   { text: "Wi‑Fi (local)", onPress: async () => updateMode(device, "wifi") },
-                  { text: "Cloud", onPress: async () => updateMode(device, "cloud") },
+                  { text: "Cloud (coming soon)", style: "destructive" },
                   { text: "Cancel", style: "cancel" },
                 ]),
             },
@@ -182,7 +210,7 @@ export default function DevicesScreen() {
                 }}
               />
               <Text style={{ color: colors.textSecondary, fontSize: 14 }}>
-                {isActive ? "Selected" : "Not selected"} · {device.online ? "Online" : "Offline"}
+                {isActive ? "Selected" : "Not selected"} · {device.online === false ? "Offline" : "Online"}
               </Text>
             </View>
 
@@ -190,55 +218,86 @@ export default function DevicesScreen() {
               Connection: {device.mode === "wifi" ? "Wi‑Fi (local)" : "Cloud"}
             </Text>
           </View>
+          <View style={{ flexDirection: "row", alignItems: "center", marginLeft: 12 }}>
+            <TouchableOpacity
+              onPress={() =>
+                Alert.alert("Device options", device.name, [
+                  {
+                    text: "Switch connection mode",
+                    onPress: () =>
+                      Alert.alert("Connection mode", "", [
+                        { text: "Wi‑Fi (local)", onPress: async () => updateMode(device, "wifi") },
+                        { text: "Cloud (coming soon)", style: "destructive" },
+                        { text: "Cancel", style: "cancel" },
+                      ]),
+                  },
+                  { text: "Rename", onPress: () => renameDevice(device) },
+                  { text: "Cancel", style: "cancel" },
+                ])
+              }
+              style={{ paddingHorizontal: 8 }}
+            >
+              <Ionicons name="settings-outline" size={22} color={colors.textSecondary} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => removeDevice(device)}
+              style={{ paddingHorizontal: 8 }}
+            >
+              <Ionicons name="trash-outline" size={22} color="#ff3b30" />
+            </TouchableOpacity>
+          </View>
         </TouchableOpacity>
       </Swipeable>
     );
   }
 
   return (
-    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
-      <View style={styles.header}>
-        <Text style={[styles.title, { color: colors.text }]}>My Devices</Text>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+        <View style={styles.header}>
+          <Text style={[styles.title, { color: colors.text }]}>My Devices</Text>
 
-        {devices.length > 0 && (
-          <TouchableOpacity onPress={() => router.push("/(device-setup)/add-device")}>
-            <Text style={{ color: colors.tint, fontSize: 16 }}>Add</Text>
-          </TouchableOpacity>
-        )}
-      </View>
-
-      <ScrollView
-        style={{ flex: 1, paddingHorizontal: 24 }}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={refreshDevices}
-            tintColor={colors.tint}
-          />
-        }
-      >
-        {devices.length === 0 ? (
-          <View style={styles.empty}>
-            <Text style={[styles.title, { color: colors.text, textAlign: "center" }]}>
-              No devices
-            </Text>
-            <Text style={{ color: colors.textSecondary, marginVertical: 16, textAlign: "center" }}>
-              Add a pet feeder to get started
-            </Text>
-            <TouchableOpacity
-              onPress={() => router.push("/(device-setup)/add-device")}
-              style={[styles.addButton, { backgroundColor: colors.tint }]}
-            >
-              <Text style={{ color: colors.onPrimary, fontWeight: "600" }}>
-                Add New Device
-              </Text>
+          {devices.length > 0 && (
+            <TouchableOpacity onPress={() => router.push("/(device-setup)/add-device")}>
+              <Text style={{ color: colors.tint, fontSize: 16 }}>Add</Text>
             </TouchableOpacity>
-          </View>
-        ) : (
-          devices.map(renderDevice)
-        )}
-      </ScrollView>
-    </SafeAreaView>
+          )}
+        </View>
+
+        <ScrollView
+          style={{ flex: 1, paddingHorizontal: 24 }}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={refreshDevices}
+              tintColor={colors.tint}
+            />
+          }
+        >
+          {devices.length === 0 ? (
+            <View style={styles.empty}>
+              <Text style={[styles.title, { color: colors.text, textAlign: "center" }]}>
+                No devices
+              </Text>
+              <Text style={{ color: colors.textSecondary, marginVertical: 16, textAlign: "center" }}>
+                Add a pet feeder to get started
+              </Text>
+              <TouchableOpacity
+                onPress={() => router.push("/(device-setup)/add-device")}
+                style={[styles.addButton, { backgroundColor: colors.tint }]}
+              >
+                <Text style={{ color: colors.onPrimary, fontWeight: "600" }}>
+                  Add New Device
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            devices.map(renderDevice)
+          )}
+        </ScrollView>
+      </SafeAreaView>
+    </GestureHandlerRootView>
   );
 }
 

@@ -4,8 +4,13 @@ export default function TabLayout() {
   return (
     <NativeTabs>
       <NativeTabs.Trigger name="index">
-        <Icon sf="house.fill" />
-        <Label>Home</Label>
+        <Icon sf="arcade.stick" />
+        <Label>Control</Label>
+      </NativeTabs.Trigger>
+
+      <NativeTabs.Trigger name="schedule">
+        <Icon sf="alarm" />
+        <Label>Schedule</Label>
       </NativeTabs.Trigger>
 
       <NativeTabs.Trigger name="devices">

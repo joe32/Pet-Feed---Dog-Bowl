@@ -225,82 +225,94 @@ export default function AddDeviceScreen() {
 
       {setupStep === "name" && (
         <View style={styles.modalOverlay}>
-          <View style={[styles.modal, { backgroundColor: colors.background }]}>
-            <Text style={[styles.modalTitle, { color: colors.text }]}>
-              Name your feeder
-            </Text>
-
-            <TextInput
-              value={deviceName}
-              onChangeText={setDeviceName}
-              style={[
-                styles.input,
-                { color: colors.text, borderColor: colors.tint },
-              ]}
-            />
-
-            <TouchableOpacity
-              style={[styles.modalButton, { backgroundColor: colors.tint }]}
-              onPress={() => setSetupStep("mode")}
-            >
-              <Text style={{ color: colors.background, fontWeight: "600" }}>
-                Next
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            keyboardVerticalOffset={80}
+            style={{ width: "100%", alignItems: "center" }}
+          >
+            <View style={[styles.modal, { backgroundColor: colors.background }]}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>
+                Name your feeder
               </Text>
-            </TouchableOpacity>
-          </View>
+
+              <TextInput
+                value={deviceName}
+                onChangeText={setDeviceName}
+                style={[
+                  styles.input,
+                  { color: colors.text, borderColor: colors.tint },
+                ]}
+              />
+
+              <TouchableOpacity
+                style={[styles.modalButton, { backgroundColor: colors.tint }]}
+                onPress={() => setSetupStep("mode")}
+              >
+                <Text style={{ color: colors.background, fontWeight: "600" }}>
+                  Next
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
         </View>
       )}
 
       {setupStep === "mode" && (
         <View style={styles.modalOverlay}>
-          <View style={[styles.modal, { backgroundColor: colors.background }]}>
-            <Text style={[styles.modalTitle, { color: colors.text }]}>
-              Choose connection type
-            </Text>
-            {[
-              { key: "wifi", label: "Wi‑Fi (local)", enabled: true },
-              { key: "cloud", label: "Cloud (control from anywhere)", enabled: false },
-            ].map(option => (
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+            keyboardVerticalOffset={80}
+            style={{ width: "100%", alignItems: "center" }}
+          >
+            <View style={[styles.modal, { backgroundColor: colors.background }]}>
+              <Text style={[styles.modalTitle, { color: colors.text }]}>
+                Choose connection type
+              </Text>
+              {[
+                { key: "wifi", label: "Wi‑Fi (local)", enabled: true },
+                { key: "cloud", label: "Cloud (control from anywhere)", enabled: false },
+              ].map(option => (
+                <TouchableOpacity
+                  key={option.key}
+                  disabled={!option.enabled}
+                  onPress={() => setConnectionMode(option.key)}
+                  style={[
+                    styles.modeRow,
+                    {
+                      opacity: option.enabled ? 1 : 0.4,
+                      borderColor:
+                        connectionMode === option.key ? colors.tint : "#00000022",
+                    },
+                  ]}
+                >
+                  <Text style={{ color: colors.text }}>{option.label}</Text>
+                  {connectionMode === option.key && (
+                    <Text style={{ color: colors.tint }}>✓</Text>
+                  )}
+                </TouchableOpacity>
+              ))}
               <TouchableOpacity
-                key={option.key}
-                disabled={!option.enabled}
-                onPress={() => setConnectionMode(option.key)}
                 style={[
-                  styles.modeRow,
+                  styles.modalButton,
                   {
-                    opacity: option.enabled ? 1 : 0.4,
-                    borderColor:
-                      connectionMode === option.key ? colors.tint : "#00000022",
+                    backgroundColor:
+                      connectionMode === "wifi" ? colors.tint : "#999",
+                    marginTop: 12,
                   },
                 ]}
+                disabled={connectionMode !== "wifi"}
+                onPress={() => {
+                  if (connectionMode === "wifi") {
+                    setSetupStep("wifi");
+                  }
+                }}
               >
-                <Text style={{ color: colors.text }}>{option.label}</Text>
-                {connectionMode === option.key && (
-                  <Text style={{ color: colors.tint }}>✓</Text>
-                )}
+                <Text style={{ color: colors.background, fontWeight: "600" }}>
+                  Next
+                </Text>
               </TouchableOpacity>
-            ))}
-            <TouchableOpacity
-              style={[
-                styles.modalButton,
-                {
-                  backgroundColor:
-                    connectionMode === "wifi" ? colors.tint : "#999",
-                  marginTop: 12,
-                },
-              ]}
-              disabled={connectionMode !== "wifi"}
-              onPress={() => {
-                if (connectionMode === "wifi") {
-                  setSetupStep("wifi");
-                }
-              }}
-            >
-              <Text style={{ color: colors.background, fontWeight: "600" }}>
-                Next
-              </Text>
-            </TouchableOpacity>
-          </View>
+            </View>
+          </KeyboardAvoidingView>
         </View>
       )}
 
@@ -308,7 +320,8 @@ export default function AddDeviceScreen() {
         <View style={styles.modalOverlay}>
           <KeyboardAvoidingView
             behavior={Platform.OS === "ios" ? "padding" : undefined}
-            style={{ width: "100%" }}
+            keyboardVerticalOffset={80}
+            style={{ width: "100%", alignItems: "center" }}
           >
             <View style={[styles.modal, { backgroundColor: colors.background }]}>
               <Text style={[styles.modalTitle, { color: colors.text }]}>
@@ -447,13 +460,16 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     backgroundColor: "#00000066",
-    justifyContent: "center",
+    justifyContent: "flex-start",
+    paddingTop: 80,
     alignItems: "center",
   },
   modal: {
     width: "90%",
+    maxWidth: 420,
     borderRadius: 16,
     padding: 20,
+    paddingBottom: 28,
   },
   modalTitle: {
     fontSize: 20,

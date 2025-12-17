@@ -90,6 +90,10 @@ void startWifiMode() {
       "{\"type\":\"petfeed\",\"model\":\"pf-1\",\"fw\":\"1.0\"}"
     );
   });
+  server.on("/hello", []() {
+    Serial.println("Hello");
+    server.send(200, "text/plain", "ok");
+  });
   server.begin();
 
   Serial.println("🌐 Local HTTP server started");
