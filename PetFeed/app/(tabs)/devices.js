@@ -5,6 +5,12 @@ import { Colors } from "../../constants/theme";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import {
+  connectToDevice as bleConnect,
+  disconnectFromDevice,
+  getConnectedDevice,
+  subscribeToConnectionChanges,
+} from "../ble/bleManager";
 
 const STORAGE_KEY = "PETFEED_DEVICES";
 const LAST_CONNECTED_KEY = "PETFEED_LAST_CONNECTED";
@@ -20,19 +26,34 @@ export default function DevicesScreen() {
 
   useFocusEffect(
     React.useCallback(() => {
+      const unsubscribe = subscribeToConnectionChanges((device) => {
+        if (device) {
+          setConnectedId(device.id);
+          AsyncStorage.setItem(LAST_CONNECTED_KEY, device.id);
+        } else {
+          setConnectedId(null);
+          AsyncStorage.removeItem(LAST_CONNECTED_KEY);
+        }
+      });
+
       loadDevices();
+
+      return () => {
+        if (unsubscribe) unsubscribe();
+      };
     }, [])
   );
 
   async function loadDevices() {
     const saved = await AsyncStorage.getItem(STORAGE_KEY);
-    const last = await AsyncStorage.getItem(LAST_CONNECTED_KEY);
-
     const parsed = saved ? JSON.parse(saved) : [];
     setDevices(parsed);
 
-    if (last && parsed.find(d => d.id === last)) {
-      setConnectedId(last);
+    const connected = getConnectedDevice();
+    if (connected && parsed.find(d => d.id === connected.id)) {
+      setConnectedId(connected.id);
+    } else {
+      setConnectedId(null);
     }
   }
 
@@ -41,7 +62,25 @@ export default function DevicesScreen() {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
   }
 
-  async function connectToDevice(device) {
+  async function handleDevicePress(device) {
+    if (connectedId === device.id) {
+      Alert.alert(
+        "Disconnect?",
+        `Disconnect from "${device.name}"?`,
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Disconnect",
+            style: "destructive",
+            onPress: async () => {
+              await disconnectFromDevice();
+            },
+          },
+        ]
+      );
+      return;
+    }
+
     if (connectedId && connectedId !== device.id) {
       Alert.alert(
         "Switch device?",
@@ -51,23 +90,24 @@ export default function DevicesScreen() {
           {
             text: "Connect",
             style: "destructive",
-            onPress: () => doConnect(device),
+            onPress: () => startConnect(device),
           },
         ]
       );
-    } else if (!connectedId) {
-      doConnect(device);
+    } else {
+      startConnect(device);
     }
   }
 
-  async function doConnect(device) {
-    setConnectingId(device.id);
-
-    setTimeout(async () => {
+  async function startConnect(device) {
+    try {
+      setConnectingId(device.id);
+      await bleConnect(device.id);
+    } catch (e) {
+      Alert.alert("Connection failed", "Could not connect to device.");
+    } finally {
       setConnectingId(null);
-      setConnectedId(device.id);
-      await AsyncStorage.setItem(LAST_CONNECTED_KEY, device.id);
-    }, 5000);
+    }
   }
 
   async function removeDevice(device) {
@@ -116,7 +156,7 @@ export default function DevicesScreen() {
     return (
       <TouchableOpacity
         key={device.id}
-        onPress={() => connectToDevice(device)}
+        onPress={() => handleDevicePress(device)}
         style={[styles.card, { backgroundColor: colors.card }]}
       >
         <View style={{ flex: 1 }}>
@@ -156,7 +196,7 @@ export default function DevicesScreen() {
               ])
             }
           >
-            <Text style={{ fontSize: 18, color: colors.textSecondary }}>⚙︎</Text>
+            <Text style={{ fontSize: 22, color: colors.textSecondary }}>⚙︎</Text>
           </TouchableOpacity>
         )}
       </TouchableOpacity>
