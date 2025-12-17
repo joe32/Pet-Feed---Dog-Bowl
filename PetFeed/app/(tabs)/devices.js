@@ -6,7 +6,7 @@ import { Colors } from "../../constants/theme";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Swipeable, GestureHandlerRootView } from "react-native-gesture-handler";
+import { Swipeable } from "react-native-gesture-handler";
 import { startOnlinePolling, stopOnlinePolling, forceReachabilityRefresh } from "../network/petfeedReachability";
 
 const STORAGE_KEY = "PETFEED_DEVICES";
@@ -244,51 +244,49 @@ export default function DevicesScreen() {
   }
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
-        <View style={styles.header}>
-          <Text style={[styles.title, { color: colors.text }]}>My Devices</Text>
+    <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
+      <View style={styles.header}>
+        <Text style={[styles.title, { color: colors.text }]}>My Devices</Text>
 
-          {devices.length > 0 && (
-            <TouchableOpacity onPress={() => router.push("/(device-setup)/add-device")}>
-              <Text style={{ color: colors.tint, fontSize: 16 }}>Add</Text>
+        {devices.length > 0 && (
+          <TouchableOpacity onPress={() => router.push("/(device-setup)/add-device")}>
+            <Text style={{ color: colors.tint, fontSize: 16 }}>Add</Text>
+          </TouchableOpacity>
+        )}
+      </View>
+
+      <ScrollView
+        style={{ flex: 1, paddingHorizontal: 24 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={refreshDevices}
+            tintColor={colors.tint}
+          />
+        }
+      >
+        {devices.length === 0 ? (
+          <View style={styles.empty}>
+            <Text style={[styles.title, { color: colors.text, textAlign: "center" }]}>
+              No devices
+            </Text>
+            <Text style={{ color: colors.textSecondary, marginVertical: 16, textAlign: "center" }}>
+              Add a pet feeder to get started
+            </Text>
+            <TouchableOpacity
+              onPress={() => router.push("/(device-setup)/add-device")}
+              style={[styles.addButton, { backgroundColor: colors.tint }]}
+            >
+              <Text style={{ color: colors.onPrimary, fontWeight: "600" }}>
+                Add New Device
+              </Text>
             </TouchableOpacity>
-          )}
-        </View>
-
-        <ScrollView
-          style={{ flex: 1, paddingHorizontal: 24 }}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={refreshDevices}
-              tintColor={colors.tint}
-            />
-          }
-        >
-          {devices.length === 0 ? (
-            <View style={styles.empty}>
-              <Text style={[styles.title, { color: colors.text, textAlign: "center" }]}>
-                No devices
-              </Text>
-              <Text style={{ color: colors.textSecondary, marginVertical: 16, textAlign: "center" }}>
-                Add a pet feeder to get started
-              </Text>
-              <TouchableOpacity
-                onPress={() => router.push("/(device-setup)/add-device")}
-                style={[styles.addButton, { backgroundColor: colors.tint }]}
-              >
-                <Text style={{ color: colors.onPrimary, fontWeight: "600" }}>
-                  Add New Device
-                </Text>
-              </TouchableOpacity>
-            </View>
-          ) : (
-            devices.map(renderDevice)
-          )}
-        </ScrollView>
-      </SafeAreaView>
-    </GestureHandlerRootView>
+          </View>
+        ) : (
+          devices.map(renderDevice)
+        )}
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 

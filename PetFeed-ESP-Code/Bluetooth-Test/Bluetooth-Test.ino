@@ -39,7 +39,7 @@ void factoryReset() {
   // Ensure BLE stack is re-initialized after reset
   BLEDevice::deinit(true);
   delay(200);
-  BLEDevice::init("PetFeed-Test");
+  BLEDevice::init("PetFeeder");
 
   wifiSSID = "";
   wifiPASS = "";
