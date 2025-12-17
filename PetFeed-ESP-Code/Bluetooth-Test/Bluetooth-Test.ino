@@ -38,6 +38,8 @@ void factoryReset() {
     pAdvertising->stop();
     delay(200);
     pAdvertising->start();
+  } else {
+    BLEDevice::startAdvertising();
   }
 
   Serial.println("✅ Factory reset complete (advertising restarted)");
@@ -48,6 +50,10 @@ class ServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer* server) override {
     deviceConnected = true;
     Serial.println("📱 Phone connected");
+    if (pCharacteristic) {
+      pCharacteristic->setValue("CONNECTED");
+      pCharacteristic->notify();
+    }
   }
 
   void onDisconnect(BLEServer* server) override {
@@ -56,26 +62,6 @@ class ServerCallbacks : public BLEServerCallbacks {
 
     // Restart advertising so app can reconnect
     BLEDevice::startAdvertising();
-  }
-};
-
-// ---- Characteristic callbacks ----
-class CharacteristicCallbacks : public BLECharacteristicCallbacks {
-  void onWrite(BLECharacteristic* characteristic) override {
-    std::string value = characteristic->getValue();
-
-    if (value.length() == 0) return;
-
-    Serial.print("✉️ Received from app: ");
-    Serial.println(value.c_str());
-
-    // Only acknowledge valid pairing request
-    if (value == "PAIR") {
-      Serial.println("✅ Pair request accepted");
-
-      characteristic->setValue("ACK");
-      characteristic->notify();
-    }
   }
 };
 
@@ -100,7 +86,6 @@ void setup() {
   );
   pCharacteristic->addDescriptor(new BLE2902());
 
-  pCharacteristic->setCallbacks(new CharacteristicCallbacks());
   pCharacteristic->setValue("READY");
 
   pService->start();

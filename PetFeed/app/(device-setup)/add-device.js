@@ -5,7 +5,7 @@ import { Colors } from "../../constants/theme";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { startScan, stopScan, connectToDevice, pairWithDevice } from "../ble/bleManager";
+import { startScan, stopScan, connectToDevice } from "../ble/bleManager";
 
 const STORAGE_KEY = "PETFEED_DEVICES";
 const LAST_CONNECTED_KEY = "PETFEED_LAST_CONNECTED";
@@ -19,6 +19,7 @@ export default function AddDeviceScreen() {
   const [devices, setDevices] = useState([]);
   const [timedOut, setTimedOut] = useState(false);
   const [connectingId, setConnectingId] = useState(null);
+  const [connectedId, setConnectedId] = useState(null);
 
   const timeoutRef = useRef(null);
 
@@ -66,7 +67,7 @@ export default function AddDeviceScreen() {
       stopScan();
       setScanning(false);
       setTimedOut(true);
-    }, 10000);
+    }, 5000);
   }
 
   async function saveDeviceAndReturn(device) {
@@ -157,29 +158,42 @@ export default function AddDeviceScreen() {
 
                     try {
                       setConnectingId(item.id);
+
+                      // Connect + discover services (this is the real "handshake")
                       await connectToDevice(item.id);
-                      const paired = await pairWithDevice(item.id);
-                      if (!paired) {
-                        throw new Error("Pairing failed");
-                      }
+
+                      // Stop scanning cleanly
                       stopScan();
                       if (timeoutRef.current) {
                         clearTimeout(timeoutRef.current);
                         timeoutRef.current = null;
                       }
+
                       setScanning(false);
                       setTimedOut(false);
-                      await saveDeviceAndReturn(item);
+                      setConnectedId(item.id);
+
+                      // Persist device and return after brief success state
+                      setTimeout(async () => {
+                        await saveDeviceAndReturn(item);
+                      }, 600);
+
                     } catch (e) {
                       console.log("Connect failed:", e);
-                      Alert.alert("Couldn’t connect", "Make sure the feeder is on and nearby, then try again.");
-                    } finally {
+                      Alert.alert(
+                        "Couldn’t connect",
+                        "Make sure the feeder is powered on and nearby, then try again."
+                      );
                       setConnectingId(null);
                     }
                   }}
                   disabled={!!connectingId}
                 >
-                  {connectingId === item.id ? (
+                  {connectedId === item.id ? (
+                    <Text style={[styles.connectText, { color: "#3ddc84" }]}>
+                      ✓ Connected
+                    </Text>
+                  ) : connectingId === item.id ? (
                     <View style={{ flexDirection: "row", alignItems: "center" }}>
                       <ActivityIndicator size="small" color={colors.tint} />
                       <Text style={[styles.connectText, { color: colors.tint, marginLeft: 8 }]}>
