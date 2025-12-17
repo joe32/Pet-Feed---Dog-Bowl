@@ -1,7 +1,9 @@
 import { BleManager } from "react-native-ble-plx";
 import { Platform } from "react-native";
+import { Buffer } from "buffer";
 
 const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
+const WIFI_CHAR_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 
 let manager = null;
 let connectedDevice = null;
@@ -79,6 +81,8 @@ export async function connectToDevice(deviceId) {
 
   await device.discoverAllServicesAndCharacteristics();
 
+  await device.services();
+
   // Monitor disconnects (power off, app close, etc)
   device.onDisconnected(() => {
     connectedDevice = null;
@@ -105,6 +109,21 @@ export async function disconnectFromDevice() {
   } catch {
     // already disconnected
   }
+}
+
+export async function sendWifiCredentials(ssid, password) {
+  if (!connectedDevice) {
+    throw new Error("No device connected");
+  }
+
+  const payload = `WIFI:ssid=${ssid};pass=${password}`;
+  const base64Payload = Buffer.from(payload, "utf8").toString("base64");
+
+  await connectedDevice.writeCharacteristicWithResponseForService(
+    SERVICE_UUID,
+    WIFI_CHAR_UUID,
+    base64Payload
+  );
 }
 
 /* -------------------- CLEANUP -------------------- */

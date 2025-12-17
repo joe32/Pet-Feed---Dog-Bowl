@@ -5,15 +5,10 @@ import { Colors } from "../../constants/theme";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import {
-  connectToDevice as bleConnect,
-  disconnectFromDevice,
-  getConnectedDevice,
-  subscribeToConnectionChanges,
-} from "../ble/bleManager";
+import { Swipeable } from "react-native-gesture-handler";
 
 const STORAGE_KEY = "PETFEED_DEVICES";
-const LAST_CONNECTED_KEY = "PETFEED_LAST_CONNECTED";
+const ACTIVE_DEVICE_KEY = "PETFEED_ACTIVE_DEVICE";
 
 export default function DevicesScreen() {
   const router = useRouter();
@@ -21,46 +16,33 @@ export default function DevicesScreen() {
   const colors = Colors[scheme];
 
   const [devices, setDevices] = useState([]);
-  const [connectingId, setConnectingId] = useState(null);
-  const [connectedId, setConnectedId] = useState(null);
+  const [activeDeviceId, setActiveDeviceId] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
 
   useFocusEffect(
     React.useCallback(() => {
-      const unsubscribe = subscribeToConnectionChanges((device) => {
-        if (device) {
-          setConnectedId(device.id);
-          AsyncStorage.setItem(LAST_CONNECTED_KEY, device.id);
-        } else {
-          setConnectedId(null);
-          AsyncStorage.removeItem(LAST_CONNECTED_KEY);
-        }
-      });
-
       loadDevices();
-
-      return () => {
-        if (unsubscribe) unsubscribe();
-      };
     }, [])
   );
 
   async function loadDevices() {
     const saved = await AsyncStorage.getItem(STORAGE_KEY);
+    const active = await AsyncStorage.getItem(ACTIVE_DEVICE_KEY);
+
     const parsed = saved ? JSON.parse(saved) : [];
     setDevices(parsed);
-
-    const connected = getConnectedDevice();
-    if (connected && parsed.find(d => d.id === connected.id)) {
-      setConnectedId(connected.id);
-    } else {
-      setConnectedId(null);
-    }
+    setActiveDeviceId(active);
   }
 
   async function refreshDevices() {
     setRefreshing(true);
-    await loadDevices();
+
+    const updated = devices.map(d => ({
+      ...d,
+      online: Math.random() > 0.3 // TEMP: simulate reachability
+    }));
+
+    await saveDevices(updated);
     setRefreshing(false);
   }
 
@@ -70,51 +52,22 @@ export default function DevicesScreen() {
   }
 
   async function handleDevicePress(device) {
-    if (connectedId === device.id) {
-      Alert.alert(
-        "Disconnect?",
-        `Disconnect from "${device.name}"?`,
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Disconnect",
-            style: "destructive",
-            onPress: async () => {
-              await disconnectFromDevice();
-            },
-          },
-        ]
-      );
-      return;
-    }
+    if (activeDeviceId === device.id) return;
 
-    if (connectedId && connectedId !== device.id) {
-      Alert.alert(
-        "Switch device?",
-        `Disconnect from the current device and connect to "${device.name}"?`,
-        [
-          { text: "Cancel", style: "cancel" },
-          {
-            text: "Connect",
-            style: "destructive",
-            onPress: () => startConnect(device),
+    Alert.alert(
+      "Switch device?",
+      `Control "${device.name}" instead?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Switch",
+          onPress: async () => {
+            setActiveDeviceId(device.id);
+            await AsyncStorage.setItem(ACTIVE_DEVICE_KEY, device.id);
           },
-        ]
-      );
-    } else {
-      startConnect(device);
-    }
-  }
-
-  async function startConnect(device) {
-    try {
-      setConnectingId(device.id);
-      await bleConnect(device.id);
-    } catch (e) {
-      Alert.alert("Connection failed", "Could not connect to device.");
-    } finally {
-      setConnectingId(null);
-    }
+        },
+      ]
+    );
   }
 
   async function removeDevice(device) {
@@ -130,9 +83,9 @@ export default function DevicesScreen() {
             const updated = devices.filter(d => d.id !== device.id);
             await saveDevices(updated);
 
-            if (connectedId === device.id) {
-              setConnectedId(null);
-              await AsyncStorage.removeItem(LAST_CONNECTED_KEY);
+            if (activeDeviceId === device.id) {
+              setActiveDeviceId(null);
+              await AsyncStorage.removeItem(ACTIVE_DEVICE_KEY);
             }
           },
         },
@@ -156,57 +109,89 @@ export default function DevicesScreen() {
     );
   }
 
-  function renderDevice(device) {
-    const isConnected = connectedId === device.id;
-    const isConnecting = connectingId === device.id;
+  async function updateMode(device, mode) {
+    const updated = devices.map(d =>
+      d.id === device.id ? { ...d, mode } : d
+    );
+    await saveDevices(updated);
+  }
 
+  function renderRightActions(device) {
     return (
       <TouchableOpacity
-        key={device.id}
-        onPress={() => handleDevicePress(device)}
-        style={[styles.card, { backgroundColor: colors.card }]}
+        style={[styles.rightAction, { backgroundColor: colors.background }]}
+        onPress={() =>
+          Alert.alert("Device options", device.name, [
+            {
+              text: "Switch connection mode",
+              onPress: () =>
+                Alert.alert("Connection mode", "", [
+                  { text: "Wi‑Fi (local)", onPress: async () => updateMode(device, "wifi") },
+                  { text: "Cloud", onPress: async () => updateMode(device, "cloud") },
+                  { text: "Cancel", style: "cancel" },
+                ]),
+            },
+            { text: "Rename", onPress: () => renameDevice(device) },
+            { text: "Remove", style: "destructive", onPress: () => removeDevice(device) },
+            { text: "Cancel", style: "cancel" },
+          ])
+        }
       >
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.deviceName, { color: colors.text }]}>
-            {device.name}
-          </Text>
+        <Text style={{ fontSize: 22, color: colors.textSecondary, padding: 16 }}>⚙︎</Text>
+      </TouchableOpacity>
+    );
+  }
 
-          <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
-            <View
-              style={{
-                width: 8,
-                height: 8,
-                borderRadius: 4,
-                marginRight: 6,
-                backgroundColor: isConnected ? "#3ddc84" : "#777",
-              }}
-            />
-            <Text style={{ color: colors.textSecondary, fontSize: 14 }}>
-              {isConnecting
-                ? "Connecting…"
-                : isConnected
-                ? "Connected"
-                : "Not connected"}
+  function renderLeftActions(device) {
+    return (
+      <TouchableOpacity
+        style={[styles.leftAction, { backgroundColor: "#ff3b30", justifyContent: "center", alignItems: "center" }]}
+        onPress={() => removeDevice(device)}
+      >
+        <Text style={{ color: "#fff", fontWeight: "600", padding: 16 }}>Delete</Text>
+      </TouchableOpacity>
+    );
+  }
+
+  function renderDevice(device) {
+    const isActive = activeDeviceId === device.id;
+
+    return (
+      <Swipeable
+        key={device.id}
+        renderLeftActions={() => renderLeftActions(device)}
+        renderRightActions={() => renderRightActions(device)}
+      >
+        <TouchableOpacity
+          onPress={() => handleDevicePress(device)}
+          style={[styles.card, { backgroundColor: colors.card }]}
+        >
+          <View style={{ flex: 1 }}>
+            <Text style={[styles.deviceName, { color: colors.text }]}>
+              {device.name}
+            </Text>
+
+            <View style={{ flexDirection: "row", alignItems: "center", marginTop: 4 }}>
+              <View
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: 4,
+                  marginRight: 6,
+                  backgroundColor: device.online ? "#3ddc84" : "#777",
+                }}
+              />
+              <Text style={{ color: colors.textSecondary, fontSize: 14 }}>
+                {isActive ? "Selected" : "Not selected"} · {device.online ? "Online" : "Offline"}
+              </Text>
+            </View>
+
+            <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 2 }}>
+              Connection: {device.mode === "wifi" ? "Wi‑Fi (local)" : "Cloud"}
             </Text>
           </View>
-        </View>
-
-        {isConnecting ? (
-          <ActivityIndicator />
-        ) : (
-          <TouchableOpacity
-            onPress={() =>
-              Alert.alert("Device options", device.name, [
-                { text: "Rename", onPress: () => renameDevice(device) },
-                { text: "Remove", style: "destructive", onPress: () => removeDevice(device) },
-                { text: "Cancel", style: "cancel" },
-              ])
-            }
-          >
-            <Text style={{ fontSize: 22, color: colors.textSecondary }}>⚙︎</Text>
-          </TouchableOpacity>
-        )}
-      </TouchableOpacity>
+        </TouchableOpacity>
+      </Swipeable>
     );
   }
 
@@ -290,5 +275,13 @@ const styles = StyleSheet.create({
   deviceName: {
     fontSize: 18,
     fontWeight: "600",
+  },
+  rightAction: {
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  leftAction: {
+    justifyContent: "center",
+    alignItems: "center",
   },
 });

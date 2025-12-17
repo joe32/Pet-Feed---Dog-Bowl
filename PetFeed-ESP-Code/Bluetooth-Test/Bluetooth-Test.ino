@@ -9,6 +9,9 @@
 #include <BLEUtils.h>
 #include <BLEServer.h>
 #include <BLE2902.h>
+#include <Preferences.h>
+#include <WiFi.h>
+#include <WebServer.h>
 
 // UUIDs (DO NOT CHANGE – app depends on these)
 #define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
@@ -19,30 +22,70 @@ BLECharacteristic* pCharacteristic = nullptr;
 
 bool deviceConnected = false;
 
+Preferences prefs;
+WebServer server(80);
+
+String wifiSSID = "";
+String wifiPASS = "";
+String deviceMode = "ble"; // "ble" or "wifi"
+
 void factoryReset() {
   Serial.println("🧨 FACTORY RESET STARTED");
 
-  // Disconnect any connected client
+  prefs.begin("petfeed", false);
+  prefs.clear();
+  prefs.end();
+
+  // Ensure BLE stack is re-initialized after reset
+  BLEDevice::deinit(true);
+  delay(200);
+  BLEDevice::init("PetFeed-Test");
+
+  wifiSSID = "";
+  wifiPASS = "";
+  deviceMode = "ble";
+
   if (pServer) {
     pServer->disconnect(0);
   }
 
-  // Reset characteristic value
-  if (pCharacteristic) {
-    pCharacteristic->setValue("READY");
+  BLEDevice::startAdvertising();
+
+  Serial.println("✅ Factory reset complete (BLE mode restored)");
+}
+
+void startWifiMode() {
+  Serial.println("📡 Starting Wi-Fi mode");
+
+  // Fully disable BLE before switching to Wi-Fi
+  BLEDevice::deinit(true);
+
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(wifiSSID.c_str(), wifiPASS.c_str());
+
+  unsigned long startAttempt = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 15000) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println();
+
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("❌ Wi-Fi failed, reverting to BLE mode");
+    factoryReset();
+    ESP.restart();
+    return;
   }
 
-  // Fully restart advertising so iOS can rediscover the device
-  BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
-  if (pAdvertising) {
-    pAdvertising->stop();
-    delay(200);
-    pAdvertising->start();
-  } else {
-    BLEDevice::startAdvertising();
-  }
+  Serial.print("✅ Wi-Fi connected, IP: ");
+  Serial.println(WiFi.localIP());
 
-  Serial.println("✅ Factory reset complete (advertising restarted)");
+  server.on("/ping", []() {
+    server.send(200, "text/plain", "ok");
+  });
+  server.begin();
+
+  Serial.println("🌐 Local HTTP server started");
 }
 
 // ---- Server callbacks ----
@@ -60,12 +103,22 @@ class ServerCallbacks : public BLEServerCallbacks {
     deviceConnected = false;
     Serial.println("📴 Phone disconnected");
 
-    // Restart advertising so app can reconnect
     BLEDevice::startAdvertising();
   }
 };
 
 void setup() {
+  prefs.begin("petfeed", true);
+  deviceMode = prefs.getString("mode", "ble");
+  wifiSSID = prefs.getString("ssid", "");
+  wifiPASS = prefs.getString("pass", "");
+  prefs.end();
+
+  if (deviceMode == "wifi" && wifiSSID.length() > 0) {
+    startWifiMode();
+    return;
+  }
+
   Serial.begin(115200);
   delay(1000);
 
@@ -85,6 +138,36 @@ void setup() {
     BLECharacteristic::PROPERTY_NOTIFY
   );
   pCharacteristic->addDescriptor(new BLE2902());
+  pCharacteristic->setCallbacks(new BLECharacteristicCallbacks() {
+    void onWrite(BLECharacteristic* characteristic) override {
+      std::string value = characteristic->getValue();
+      String cmd = String(value.c_str());
+
+      if (cmd.startsWith("WIFI:")) {
+        int s = cmd.indexOf("ssid=");
+        int p = cmd.indexOf(";pass=");
+
+        if (s >= 0 && p >= 0) {
+          wifiSSID = cmd.substring(s + 5, p);
+          wifiPASS = cmd.substring(p + 6);
+
+          prefs.begin("petfeed", false);
+          prefs.putString("ssid", wifiSSID);
+          prefs.putString("pass", wifiPASS);
+          prefs.putString("mode", "wifi");
+          prefs.end();
+
+          characteristic->setValue("WIFI_SAVED");
+          characteristic->notify();
+
+          Serial.println("💾 Wi-Fi credentials saved, rebooting");
+          delay(300);
+          delay(500);
+          ESP.restart();
+        }
+      }
+    }
+  });
 
   pCharacteristic->setValue("READY");
 
@@ -105,15 +188,18 @@ void setup() {
 }
 
 void loop() {
+  if (deviceMode == "wifi") {
+    server.handleClient();
+    return;
+  }
+
   if (Serial.available()) {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim();
 
     if (cmd.equalsIgnoreCase("factory")) {
       factoryReset();
-    } else {
-      Serial.print("❓ Unknown command: ");
-      Serial.println(cmd);
+      ESP.restart();
     }
   }
 

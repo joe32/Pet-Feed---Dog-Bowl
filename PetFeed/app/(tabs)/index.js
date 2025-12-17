@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, StyleSheet, Modal, Pressable } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, Modal, Pressable, AppState } from "react-native";
 import { useColorScheme } from "react-native";
 import { Colors } from "../../constants/theme";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -20,6 +20,31 @@ export default function HomeScreen() {
     loadDevices();
   }, []);
 
+  useEffect(() => {
+    let interval;
+    async function checkOnline() {
+      if (!currentDevice || !currentDevice.ip) return;
+
+      try {
+        const controller = new AbortController();
+        setTimeout(() => controller.abort(), 2000);
+
+        await fetch(`http://${currentDevice.ip}/ping`, {
+          signal: controller.signal,
+        });
+
+        updateDeviceConnection(currentDevice.id, true);
+      } catch {
+        updateDeviceConnection(currentDevice.id, false);
+      }
+    }
+
+    interval = setInterval(checkOnline, 5000);
+    checkOnline();
+
+    return () => clearInterval(interval);
+  }, [currentId]);
+
   async function loadDevices() {
     const saved = await AsyncStorage.getItem(STORAGE_KEY);
     const last = await AsyncStorage.getItem(LAST_CONNECTED_KEY);
@@ -36,6 +61,16 @@ export default function HomeScreen() {
     setCurrentId(device.id);
     await AsyncStorage.setItem(LAST_CONNECTED_KEY, device.id);
     setDropdownOpen(false);
+  }
+
+  async function updateDeviceConnection(id, connected) {
+    setDevices(prev => {
+      const updated = prev.map(d =>
+        d.id === id ? { ...d, connected } : d
+      );
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      return updated;
+    });
   }
 
   const currentDevice = devices.find(d => d.id === currentId);
@@ -79,6 +114,9 @@ export default function HomeScreen() {
         {/* Center: title (ABSOLUTE) */}
         <View style={styles.centerTitle}>
           <Text style={[styles.title, { color: colors.text }]}>Home</Text>
+          <Text style={{ color: colors.textSecondary, fontSize: 14, marginTop: 2 }}>
+            {currentDevice ? `Connected: ${currentDevice.name}` : "No device connected"}
+          </Text>
         </View>
 
         {/* Right spacer */}

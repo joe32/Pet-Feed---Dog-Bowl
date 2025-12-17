@@ -5,7 +5,7 @@ import { Colors } from "../../constants/theme";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { startScan, stopScan, connectToDevice } from "../ble/bleManager";
+import { startScan, stopScan, connectToDevice, sendWifiCredentials } from "../ble/bleManager";
 
 const STORAGE_KEY = "PETFEED_DEVICES";
 const LAST_CONNECTED_KEY = "PETFEED_LAST_CONNECTED";
@@ -21,10 +21,17 @@ export default function AddDeviceScreen() {
   const [connectingId, setConnectingId] = useState(null);
   const [connectedId, setConnectedId] = useState(null);
 
-  const [setupStep, setSetupStep] = useState(null); // null | "name" | "mode"
+  // null | "name" | "mode" | "wifi"
+  const [setupStep, setSetupStep] = useState(null);
   const [pendingDevice, setPendingDevice] = useState(null);
   const [deviceName, setDeviceName] = useState("");
-  const [connectionMode, setConnectionMode] = useState(null); // "ble" | "wifi" | "cloud"
+  // "wifi" | "cloud"
+  const [connectionMode, setConnectionMode] = useState(null);
+
+  // Wi-Fi step state
+  const [wifiStep, setWifiStep] = useState(false);
+  const [ssid, setSsid] = useState("");
+  const [password, setPassword] = useState("");
 
   const timeoutRef = useRef(null);
 
@@ -75,7 +82,7 @@ export default function AddDeviceScreen() {
     }, 5000);
   }
 
-  async function saveDeviceAndReturn(device, name, mode) {
+  async function saveDeviceAndReturn(device, name, mode, ssidParam) {
     const savedRaw = await AsyncStorage.getItem(STORAGE_KEY);
     const saved = savedRaw ? JSON.parse(savedRaw) : [];
 
@@ -85,6 +92,7 @@ export default function AddDeviceScreen() {
         id: device.id,
         name,
         mode,
+        ...(mode === "Wi‑Fi (local)" && ssidParam ? { ssid: ssidParam } : {}),
       },
     ];
 
@@ -247,12 +255,10 @@ export default function AddDeviceScreen() {
         <View style={styles.modalOverlay}>
           <View style={[styles.modal, { backgroundColor: colors.background }]}>
             <Text style={[styles.modalTitle, { color: colors.text }]}>
-              Choose connection mode
+              Choose connection type
             </Text>
-
             {[
-              { key: "ble", label: "Bluetooth (local)", enabled: true },
-              { key: "wifi", label: "Wi‑Fi (local)", enabled: false },
+              { key: "wifi", label: "Wi‑Fi (local)", enabled: true },
               { key: "cloud", label: "Cloud (control from anywhere)", enabled: false },
             ].map(option => (
               <TouchableOpacity
@@ -274,23 +280,94 @@ export default function AddDeviceScreen() {
                 )}
               </TouchableOpacity>
             ))}
-
             <TouchableOpacity
               style={[
                 styles.modalButton,
                 {
                   backgroundColor:
-                    connectionMode === "ble" ? colors.tint : "#999",
+                    connectionMode === "wifi" ? colors.tint : "#999",
                   marginTop: 12,
                 },
               ]}
-              disabled={connectionMode !== "ble"}
-              onPress={() =>
-                saveDeviceAndReturn(pendingDevice, deviceName, "Bluetooth (local)")
-              }
+              disabled={connectionMode !== "wifi"}
+              onPress={() => {
+                if (connectionMode === "wifi") {
+                  setSetupStep("wifi");
+                }
+              }}
             >
               <Text style={{ color: colors.background, fontWeight: "600" }}>
-                Finish
+                Next
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {setupStep === "wifi" && (
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modal, { backgroundColor: colors.background }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>
+              Connect feeder to Wi‑Fi
+            </Text>
+            <Text style={[styles.subtitle, { color: colors.textSecondary, marginBottom: 18 }]}>
+              Enter your home Wi‑Fi details to connect your feeder to your network.
+            </Text>
+            <TextInput
+              value={ssid}
+              onChangeText={setSsid}
+              style={[
+                styles.input,
+                { color: colors.text, borderColor: colors.tint, marginBottom: 12 },
+              ]}
+              placeholder="Wi‑Fi name (SSID)"
+              placeholderTextColor={colors.textSecondary}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <TextInput
+              value={password}
+              onChangeText={setPassword}
+              style={[
+                styles.input,
+                { color: colors.text, borderColor: colors.tint, marginBottom: 18 },
+              ]}
+              placeholder="Wi‑Fi password"
+              placeholderTextColor={colors.textSecondary}
+              autoCapitalize="none"
+              autoCorrect={false}
+              secureTextEntry
+            />
+            <TouchableOpacity
+              style={[
+                styles.modalButton,
+                {
+                  backgroundColor: ssid ? colors.tint : "#999",
+                },
+              ]}
+              disabled={!ssid}
+              onPress={async () => {
+                try {
+                  // Send Wi‑Fi credentials to ESP over BLE
+                  await sendWifiCredentials(ssid, password);
+
+                  // Persist device locally (do NOT store password)
+                  await saveDeviceAndReturn(
+                    pendingDevice,
+                    deviceName,
+                    "Wi‑Fi (local)",
+                    ssid
+                  );
+                } catch (e) {
+                  Alert.alert(
+                    "Setup failed",
+                    "Could not send Wi‑Fi details to the feeder. Make sure it is still connected and try again."
+                  );
+                }
+              }}
+            >
+              <Text style={{ color: colors.background, fontWeight: "600" }}>
+                Save & Continue
               </Text>
             </TouchableOpacity>
           </View>
