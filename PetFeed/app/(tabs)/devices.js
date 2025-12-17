@@ -37,7 +37,11 @@ export default function DevicesScreen() {
 
         await loadDevices();
 
-        if (activeDevice && activeDevice.ip) {
+        if (
+          activeDevice &&
+          typeof activeDevice.id === "string" &&
+          typeof activeDevice.ip === "string"
+        ) {
           startOnlinePolling({
             deviceId: activeDevice.id,
             ip: activeDevice.ip,
@@ -54,7 +58,9 @@ export default function DevicesScreen() {
       })();
 
       return () => {
-        stopOnlinePolling();
+        if (typeof stopOnlinePolling === "function") {
+          stopOnlinePolling();
+        }
       };
     }, [])
   );
@@ -104,7 +110,9 @@ export default function DevicesScreen() {
 
   async function refreshDevices() {
     setRefreshing(true);
-    await forceReachabilityRefresh();
+    if (typeof forceReachabilityRefresh === "function") {
+      await forceReachabilityRefresh();
+    }
     await loadDevices();
     setRefreshing(false);
   }
@@ -265,6 +273,35 @@ export default function DevicesScreen() {
               Connection: {device.mode === "wifi" ? "Wi‑Fi (local)" : "Cloud"}
             </Text>
           </View>
+          <View style={styles.inlineActions}>
+            <TouchableOpacity
+              onPress={() =>
+                Alert.alert("Device options", device.name, [
+                  {
+                    text: "Switch connection mode",
+                    onPress: () =>
+                      Alert.alert("Connection mode", "", [
+                        { text: "Wi‑Fi (local)", onPress: async () => updateMode(device, "wifi") },
+                        { text: "Cloud (coming soon)", style: "destructive" },
+                        { text: "Cancel", style: "cancel" },
+                      ]),
+                  },
+                  { text: "Rename", onPress: () => renameDevice(device) },
+                  { text: "Cancel", style: "cancel" },
+                ])
+              }
+              style={{ paddingHorizontal: 8 }}
+            >
+              <Ionicons name="settings-outline" size={22} color={colors.textSecondary} />
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => removeDevice(device)}
+              style={{ paddingHorizontal: 8 }}
+            >
+              <Ionicons name="trash-outline" size={22} color="#ff3b30" />
+            </TouchableOpacity>
+          </View>
         </TouchableOpacity>
       </Swipeable>
     );
@@ -278,7 +315,7 @@ export default function DevicesScreen() {
 
           {devices.length > 0 && (
             <TouchableOpacity onPress={() => router.push("/(device-setup)/add-device")}>
-              <Text style={{ color: colors.tint, fontSize: 16 }}>Add</Text>
+              <Text style={{ color: colors.tint, fontSize: 16 }}>Add Device +</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -360,5 +397,10 @@ const styles = StyleSheet.create({
   leftAction: {
     justifyContent: "center",
     alignItems: "center",
+  },
+  inlineActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginLeft: 12,
   },
 });

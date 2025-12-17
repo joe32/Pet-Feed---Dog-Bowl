@@ -3,6 +3,7 @@ import { useColorScheme } from "react-native";
 import { Colors } from "../../constants/theme";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useEffect, useState, useCallback } from "react";
+import { useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const STORAGE_KEY = "PETFEED_DEVICES";
@@ -48,9 +49,11 @@ export default function HomeScreen() {
     }
   }, []);
 
-  useEffect(() => {
-    loadDevices();
-  }, [loadDevices]);
+  useFocusEffect(
+    useCallback(() => {
+      loadDevices();
+    }, [loadDevices])
+  );
 
   useEffect(() => {
     let interval;
@@ -172,9 +175,6 @@ export default function HomeScreen() {
         {/* Center: title (ABSOLUTE) */}
         <View style={styles.centerTitle}>
           <Text style={[styles.title, { color: colors.text }]}>Control</Text>
-          <Text style={{ color: colors.textSecondary, fontSize: 14, marginTop: 2 }}>
-            {currentDevice && currentDevice.id === currentId ? `Connected: ${currentDevice.name}` : "No device connected"}
-          </Text>
         </View>
 
         {/* Right spacer */}
@@ -291,7 +291,8 @@ const styles = StyleSheet.create({
   centerTitle: {
     position: "absolute",
     left: 0,
-    right: 0,
+    right: 40,
+    top: 8,
     alignItems: "flex-end",
   },
   centerControl: {
