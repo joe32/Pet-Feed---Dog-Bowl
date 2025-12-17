@@ -1,12 +1,12 @@
-import { View, Text, TouchableOpacity, StyleSheet, Modal, Pressable, AppState } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, Modal, Pressable, ScrollView, RefreshControl } from "react-native";
 import { useColorScheme } from "react-native";
 import { Colors } from "../../constants/theme";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const STORAGE_KEY = "PETFEED_DEVICES";
-const LAST_CONNECTED_KEY = "PETFEED_LAST_CONNECTED";
+const ACTIVE_DEVICE_KEY = "PETFEED_ACTIVE_DEVICE";
 
 export default function HomeScreen() {
   const scheme = useColorScheme() ?? "light";
@@ -15,68 +15,84 @@ export default function HomeScreen() {
   const [devices, setDevices] = useState([]);
   const [currentId, setCurrentId] = useState(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    loadDevices();
+  async function pingDevice(ip) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 2000);
+
+      await fetch(`http://${ip}/ping`, {
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeout);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  const loadDevices = useCallback(async () => {
+    const saved = await AsyncStorage.getItem(STORAGE_KEY);
+    const activeId = await AsyncStorage.getItem(ACTIVE_DEVICE_KEY);
+
+    const parsed = saved ? JSON.parse(saved) : [];
+    // Do not assume online is true; keep as is or false
+    setDevices(parsed);
+
+    if (activeId && parsed.find(d => d.id === activeId)) {
+      setCurrentId(activeId);
+    } else {
+      setCurrentId(null);
+    }
   }, []);
 
   useEffect(() => {
+    loadDevices();
+  }, [loadDevices]);
+
+  useEffect(() => {
     let interval;
-    async function checkOnline() {
-      if (!currentDevice || !currentDevice.ip) return;
 
-      try {
-        const controller = new AbortController();
-        setTimeout(() => controller.abort(), 2000);
+    async function checkAllDevices() {
+      if (devices.length === 0) return;
 
-        await fetch(`http://${currentDevice.ip}/ping`, {
-          signal: controller.signal,
-        });
+      const updatedDevices = await Promise.all(
+        devices.map(async device => {
+          if (!device.ip) return device;
+          const isOnline = await pingDevice(device.ip);
+          return { ...device, online: isOnline };
+        })
+      );
 
-        updateDeviceConnection(currentDevice.id, true);
-      } catch {
-        updateDeviceConnection(currentDevice.id, false);
+      setDevices(updatedDevices);
+      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updatedDevices));
+
+      // If current device is offline, update UI immediately
+      const currentDeviceUpdated = updatedDevices.find(d => d.id === currentId);
+      if (currentDeviceUpdated && currentDeviceUpdated.online === false) {
+        setCurrentId(currentDeviceUpdated.id); // keep currentId but UI will read online false
       }
     }
 
-    interval = setInterval(checkOnline, 5000);
-    checkOnline();
+    interval = setInterval(checkAllDevices, 5000);
+    checkAllDevices();
 
     return () => clearInterval(interval);
-  }, [currentId]);
-
-  async function loadDevices() {
-    const saved = await AsyncStorage.getItem(STORAGE_KEY);
-    const last = await AsyncStorage.getItem(LAST_CONNECTED_KEY);
-
-    const parsed = saved ? JSON.parse(saved) : [];
-    setDevices(parsed);
-
-    if (last && parsed.find(d => d.id === last)) {
-      setCurrentId(last);
-    }
-  }
+  }, [devices, currentId]);
 
   async function switchDevice(device) {
     setCurrentId(device.id);
-    await AsyncStorage.setItem(LAST_CONNECTED_KEY, device.id);
+    await AsyncStorage.setItem(ACTIVE_DEVICE_KEY, device.id);
     setDropdownOpen(false);
-  }
-
-  async function updateDeviceConnection(id, connected) {
-    setDevices(prev => {
-      const updated = prev.map(d =>
-        d.id === id ? { ...d, connected } : d
-      );
-      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-      return updated;
-    });
+    // Do not mark online here
   }
 
   const currentDevice = devices.find(d => d.id === currentId);
 
   async function sendHello() {
-    if (!currentDevice || !currentDevice.ip) return;
+    if (!currentDevice || !currentDevice.ip || currentDevice.online !== true) return;
 
     try {
       const controller = new AbortController();
@@ -99,6 +115,24 @@ export default function HomeScreen() {
     }
   }
 
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    // Force a full ping cycle
+    if (devices.length > 0) {
+      const updatedDevices = await Promise.all(
+        devices.map(async device => {
+          if (!device.ip) return device;
+          const isOnline = await pingDevice(device.ip);
+          return { ...device, online: isOnline };
+        })
+      );
+      setDevices(updatedDevices);
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updatedDevices));
+    }
+    await loadDevices();
+    setRefreshing(false);
+  }, [devices, loadDevices]);
+
   return (
     <SafeAreaView
       style={{
@@ -118,14 +152,14 @@ export default function HomeScreen() {
               <View
                 style={[
                   styles.statusDot,
-                  { backgroundColor: currentDevice.connected ? "#3ddc84" : "#777" },
+                  { backgroundColor: currentDevice.online ? "#3ddc84" : "#777" },
                 ]}
               />
               <Text
                 style={{ color: colors.textSecondary, fontSize: 14 }}
                 numberOfLines={1}
               >
-                {currentDevice.name} · {currentDevice.connected ? "Online" : "Offline"}
+                {currentDevice.name} · {currentDevice.online ? "Online" : "Offline"}
               </Text>
             </TouchableOpacity>
           ) : (
@@ -139,7 +173,7 @@ export default function HomeScreen() {
         <View style={styles.centerTitle}>
           <Text style={[styles.title, { color: colors.text }]}>Control</Text>
           <Text style={{ color: colors.textSecondary, fontSize: 14, marginTop: 2 }}>
-            {currentDevice ? `Connected: ${currentDevice.name}` : "No device connected"}
+            {currentDevice && currentDevice.id === currentId ? `Connected: ${currentDevice.name}` : "No device connected"}
           </Text>
         </View>
 
@@ -147,15 +181,19 @@ export default function HomeScreen() {
         <View style={styles.rightSlot} />
       </View>
 
-      <View style={styles.centerControl}>
+      <ScrollView
+        style={{ flex: 1 }}
+        contentContainerStyle={{ flexGrow: 1, justifyContent: "center", alignItems: "center" }}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+      >
         <TouchableOpacity
-          disabled={!currentDevice || !currentDevice.ip}
+          disabled={!currentDevice || currentDevice.online !== true}
           onPress={sendHello}
           style={[
             styles.controlButton,
             {
               backgroundColor:
-                currentDevice && currentDevice.ip
+                currentDevice && currentDevice.online === true
                   ? colors.tint
                   : colors.icon,
             },
@@ -165,7 +203,7 @@ export default function HomeScreen() {
             Send Test Command
           </Text>
         </TouchableOpacity>
-      </View>
+      </ScrollView>
 
       {/* Dropdown */}
       <Modal
@@ -185,7 +223,7 @@ export default function HomeScreen() {
                 <View
                   style={[
                     styles.statusDot,
-                    { backgroundColor: device.connected ? "#3ddc84" : "#777" },
+                    { backgroundColor: device.online ? "#3ddc84" : "#777" },
                   ]}
                 />
                 <Text style={{ color: colors.text, flex: 1 }}>

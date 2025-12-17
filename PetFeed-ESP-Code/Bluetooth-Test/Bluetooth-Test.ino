@@ -94,6 +94,13 @@ void startWifiMode() {
     Serial.println("Hello");
     server.send(200, "text/plain", "ok");
   });
+  server.on("/factory-reset", HTTP_POST, []() {
+    Serial.println("🧨 FACTORY RESET REQUESTED FROM APP");
+    server.send(200, "text/plain", "resetting");
+    delay(200);
+    factoryReset();
+    ESP.restart();
+  });
   server.begin();
 
   Serial.println("🌐 Local HTTP server started");

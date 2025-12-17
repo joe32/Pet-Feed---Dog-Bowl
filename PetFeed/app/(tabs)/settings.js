@@ -8,6 +8,25 @@ export default function SettingsScreen() {
   const scheme = useColorScheme() ?? "light";
   const colors = Colors[scheme];
 
+  const factoryResetAllDevices = async () => {
+    try {
+      const raw = await AsyncStorage.getItem("PETFEED_DEVICES");
+      const devices = raw ? JSON.parse(raw) : [];
+
+      for (const device of devices) {
+        if (device.ip) {
+          try {
+            await fetch(`http://${device.ip}/factory-reset`, { method: "POST" });
+          } catch (e) {
+            // Device may be offline; ignore and continue
+          }
+        }
+      }
+    } catch (e) {
+      // Ignore – best effort reset
+    }
+  };
+
   const confirmClearDevices = () => {
     Alert.alert(
       "Clear all devices",
@@ -18,8 +37,8 @@ export default function SettingsScreen() {
           text: "Clear",
           style: "destructive",
           onPress: async () => {
-            // TODO: also disconnect BLE devices here later
-            await AsyncStorage.removeItem("devices");
+            await factoryResetAllDevices();
+            await AsyncStorage.removeItem("PETFEED_DEVICES");
           },
         },
       ]
@@ -36,6 +55,7 @@ export default function SettingsScreen() {
           text: "Clear",
           style: "destructive",
           onPress: async () => {
+            await factoryResetAllDevices();
             await AsyncStorage.clear();
           },
         },

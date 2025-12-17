@@ -7,6 +7,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter, useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Swipeable, GestureHandlerRootView } from "react-native-gesture-handler";
+import { startOnlinePolling, stopOnlinePolling, forceReachabilityRefresh } from "../../lib/petfeedReachability";
 
 const STORAGE_KEY = "PETFEED_DEVICES";
 const ACTIVE_DEVICE_KEY = "PETFEED_ACTIVE_DEVICE";
@@ -23,6 +24,11 @@ export default function DevicesScreen() {
   useFocusEffect(
     React.useCallback(() => {
       loadDevices();
+      startOnlinePolling();
+
+      return () => {
+        stopOnlinePolling();
+      };
     }, [])
   );
   
@@ -71,6 +77,8 @@ export default function DevicesScreen() {
 
   async function refreshDevices() {
     setRefreshing(true);
+    await forceReachabilityRefresh();
+    await loadDevices();
     setRefreshing(false);
   }
 
@@ -108,6 +116,18 @@ export default function DevicesScreen() {
           text: "Remove",
           style: "destructive",
           onPress: async () => {
+            // Trigger factory reset on ESP (best‑effort)
+            if (device.ip) {
+              try {
+                await fetch(`http://${device.ip}/factory-reset`, {
+                  method: "POST",
+                });
+                console.log("Factory reset requested for device:", device.name);
+              } catch (e) {
+                console.log("Factory reset request failed:", e);
+              }
+            }
+
             const updated = devices.filter(d => d.id !== device.id);
             await saveDevices(updated);
 
@@ -210,42 +230,13 @@ export default function DevicesScreen() {
                 }}
               />
               <Text style={{ color: colors.textSecondary, fontSize: 14 }}>
-                {isActive ? "Selected" : "Not selected"} · {device.online === false ? "Offline" : "Online"}
+                {isActive ? "Selected" : "Not selected"} · {device.online ? "Online" : "Offline"}
               </Text>
             </View>
 
             <Text style={{ color: colors.textSecondary, fontSize: 13, marginTop: 2 }}>
               Connection: {device.mode === "wifi" ? "Wi‑Fi (local)" : "Cloud"}
             </Text>
-          </View>
-          <View style={{ flexDirection: "row", alignItems: "center", marginLeft: 12 }}>
-            <TouchableOpacity
-              onPress={() =>
-                Alert.alert("Device options", device.name, [
-                  {
-                    text: "Switch connection mode",
-                    onPress: () =>
-                      Alert.alert("Connection mode", "", [
-                        { text: "Wi‑Fi (local)", onPress: async () => updateMode(device, "wifi") },
-                        { text: "Cloud (coming soon)", style: "destructive" },
-                        { text: "Cancel", style: "cancel" },
-                      ]),
-                  },
-                  { text: "Rename", onPress: () => renameDevice(device) },
-                  { text: "Cancel", style: "cancel" },
-                ])
-              }
-              style={{ paddingHorizontal: 8 }}
-            >
-              <Ionicons name="settings-outline" size={22} color={colors.textSecondary} />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              onPress={() => removeDevice(device)}
-              style={{ paddingHorizontal: 8 }}
-            >
-              <Ionicons name="trash-outline" size={22} color="#ff3b30" />
-            </TouchableOpacity>
           </View>
         </TouchableOpacity>
       </Swipeable>
