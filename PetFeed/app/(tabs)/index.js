@@ -70,7 +70,6 @@ export default function HomeScreen() {
       );
 
       setDevices(updatedDevices);
-      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updatedDevices));
 
       // If current device is offline, update UI immediately
       const currentDeviceUpdated = updatedDevices.find(d => d.id === currentId);
@@ -93,6 +92,30 @@ export default function HomeScreen() {
   }
 
   const currentDevice = devices.find(d => d.id === currentId);
+
+  async function sendCommand(command) {
+    if (!currentDevice || !currentDevice.ip || currentDevice.online !== true) return;
+
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 3000);
+
+      const res = await fetch(`http://${currentDevice.ip}/command`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ command }),
+        signal: controller.signal,
+      });
+
+      clearTimeout(timeout);
+
+      if (!res.ok) {
+        throw new Error("Non-200 response");
+      }
+    } catch (e) {
+      console.log("Command failed", e);
+    }
+  }
 
   async function sendHello() {
     if (!currentDevice || !currentDevice.ip || currentDevice.online !== true) return;
@@ -130,7 +153,6 @@ export default function HomeScreen() {
         })
       );
       setDevices(updatedDevices);
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updatedDevices));
     }
     await loadDevices();
     setRefreshing(false);
@@ -186,23 +208,43 @@ export default function HomeScreen() {
         contentContainerStyle={{ flexGrow: 1, justifyContent: "center", alignItems: "center" }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        <TouchableOpacity
-          disabled={!currentDevice || currentDevice.online !== true}
-          onPress={sendHello}
-          style={[
-            styles.controlButton,
-            {
-              backgroundColor:
-                currentDevice && currentDevice.online === true
-                  ? colors.tint
-                  : colors.icon,
-            },
-          ]}
-        >
-          <Text style={{ color: colors.background, fontSize: 18, fontWeight: "600" }}>
-            Send Test Command
-          </Text>
-        </TouchableOpacity>
+        <View style={styles.controlRow}>
+          <TouchableOpacity
+            disabled={!currentDevice || currentDevice.online !== true}
+            onPress={() => sendCommand("OPEN")}
+            style={[
+              styles.controlButton,
+              {
+                backgroundColor:
+                  currentDevice && currentDevice.online === true
+                    ? colors.tint
+                    : colors.icon,
+              },
+            ]}
+          >
+            <Text style={{ color: colors.background, fontSize: 18, fontWeight: "600" }}>
+              Open
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            disabled={!currentDevice || currentDevice.online !== true}
+            onPress={() => sendCommand("CLOSE")}
+            style={[
+              styles.controlButton,
+              {
+                backgroundColor:
+                  currentDevice && currentDevice.online === true
+                    ? colors.tint
+                    : colors.icon,
+              },
+            ]}
+          >
+            <Text style={{ color: colors.background, fontSize: 18, fontWeight: "600" }}>
+              Close
+            </Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
 
       {/* Dropdown */}
@@ -304,5 +346,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
     paddingVertical: 16,
     borderRadius: 20,
+  },
+  controlRow: {
+    flexDirection: "column",
+    gap: 16,
+    alignItems: "center",
   },
 });
