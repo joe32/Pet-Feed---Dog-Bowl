@@ -1,9 +1,9 @@
+import React, { useState } from "react";
 import { View, Text, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from "react-native";
 import { useColorScheme } from "react-native";
 import { Colors } from "../../constants/theme";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useRouter, useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const STORAGE_KEY = "PETFEED_DEVICES";
@@ -18,9 +18,11 @@ export default function DevicesScreen() {
   const [connectingId, setConnectingId] = useState(null);
   const [connectedId, setConnectedId] = useState(null);
 
-  useEffect(() => {
-    loadDevices();
-  }, []);
+  useFocusEffect(
+    React.useCallback(() => {
+      loadDevices();
+    }, [])
+  );
 
   async function loadDevices() {
     const saved = await AsyncStorage.getItem(STORAGE_KEY);
