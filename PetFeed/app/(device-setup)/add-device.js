@@ -61,45 +61,67 @@ export default function AddDeviceScreen() {
   const [manualSsid, setManualSsid] = useState(false);
   const [loadingWifi, setLoadingWifi] = useState(false);
   const [wifiTimedOut, setWifiTimedOut] = useState(false);
-  
-  async function scanWifiNetworks() {
-    setLoadingWifi(true);
-    setWifiTimedOut(false);
-    setWifiNetworks([]);
 
-    let timeout;
-    try {
-      const unsubscribe = await subscribeToNotifications((value) => {
-        if (typeof value !== "string") return;
-        if (!value.startsWith("WIFISCAN:")) return;
+  // test to show popup on expo.
 
-        const payload = value.replace("WIFISCAN:", "");
-        if (!payload || payload === "EMPTY") {
-          setWifiNetworks([]);
-        } else {
-          const nets = payload.split(",").filter(Boolean);
-          setWifiNetworks(nets);
-        }
+  useEffect(() => {
+    setSetupStep("wifi");
+  }, []);
 
-        setLoadingWifi(false);
-        clearTimeout(timeout);
-        unsubscribe?.();
-      });
+useEffect(() => {
+  if (setupStep === "wifi") {
+    // Always start UI scanning immediately
+    scanWifiNetworks();
+  }
+}, [setupStep]);
 
-      // request scan
-      await writeCommand("WIFISCAN");
+async function scanWifiNetworks() {
+  setLoadingWifi(true);
+  setWifiTimedOut(false);
+  setWifiNetworks([]);
 
-      // hard timeout (10s)
-      timeout = setTimeout(() => {
-        setLoadingWifi(false);
-        setWifiTimedOut(true);
-        unsubscribe?.();
-      }, 10000);
-    } catch (e) {
+  let finished = false;
+
+  // UI timeout – ALWAYS fires after 10s
+  const uiTimeout = setTimeout(() => {
+    if (finished) return;
+    finished = true;
+    setLoadingWifi(false);
+    setWifiTimedOut(true);
+  }, 10000);
+
+  // If no hostname (Expo Go / preview), do NOT return early.
+  // Just let the spinner run until timeout.
+  if (!generatedHost) {
+    return;
+  }
+
+  const controller = new AbortController();
+  const abortTimeout = setTimeout(() => controller.abort(), 10000);
+
+  try {
+    const res = await fetch(`http://${generatedHost}.local/WIFISCAN`, {
+      signal: controller.signal,
+    });
+
+    if (!res.ok) throw new Error("Bad response");
+
+    const data = await res.json();
+    if (Array.isArray(data.networks)) {
+      setWifiNetworks(data.networks);
+    }
+  } catch (e) {
+    // ignored – UI timeout handles state
+  } finally {
+    clearTimeout(abortTimeout);
+    if (!finished) {
+      finished = true;
+      clearTimeout(uiTimeout);
       setLoadingWifi(false);
       setWifiTimedOut(true);
     }
   }
+}
 
   // Track the generated hostname during setup
   const [generatedHost, setGeneratedHost] = useState(null);
@@ -429,7 +451,9 @@ export default function AddDeviceScreen() {
             keyboardVerticalOffset={80}
             style={{ width: "100%", alignItems: "center" }}
           >
-            <View style={[styles.modal, { backgroundColor: colors.background }]}>
+            <View
+              style={[styles.modal, { backgroundColor: colors.background }]}
+            >
               <Text style={[styles.modalTitle, { color: colors.text }]}>
                 Connect feeder to Wi‑Fi
               </Text>
@@ -443,30 +467,14 @@ export default function AddDeviceScreen() {
                 network.
               </Text>
 
-              {/* Scanning indicator */}
-              {loadingWifi && (
-                <View style={styles.wifiScanningSection}>
-                  <ActivityIndicator size="large" color={colors.tint} />
-                  <Text
-                    style={{
-                      color: colors.textSecondary,
-                      marginTop: 12,
-                      fontWeight: "600",
-                      fontSize: 16,
-                      textAlign: "center",
-                    }}
-                  >
-                    Scanning for Wi‑Fi networks…
-                  </Text>
-                </View>
-              )}
-
               {/* Wi-Fi networks list container */}
               <View style={styles.wifiListBox}>
-                {loadingWifi ? (
-                  // Show nothing in the box while scanning, spinner is above
-                  null
-                ) : wifiNetworks.length > 0 ? (
+                {loadingWifi && (
+                  <View style={styles.wifiSpinnerCorner}>
+                    <ActivityIndicator size="small" color={colors.tint} />
+                  </View>
+                )}
+                {loadingWifi ? null : wifiNetworks.length > 0 ? (
                   <ScrollView
                     style={{ flex: 1 }}
                     contentContainerStyle={{ paddingVertical: 0 }}
@@ -513,26 +521,19 @@ export default function AddDeviceScreen() {
                 )}
               </View>
 
-              {/* Re-scan button: always visible after initial scan finishes */}
-              {!loadingWifi && (
-                <TouchableOpacity
-                  onPress={scanWifiNetworks}
-                  style={styles.wifiRescanButton}
-                >
-                  <Text
-                    style={{
-                      color: colors.tint,
-                      fontWeight: "600",
-                      fontSize: 14,
-                    }}
+              {/* Wi-Fi actions row: Re-scan and Enter manually */}
+              <View style={styles.wifiActionsRow}>
+                {wifiTimedOut && (
+                  <TouchableOpacity
+                    onPress={scanWifiNetworks}
+                    style={styles.wifiRescanButton}
                   >
-                    Re‑scan networks
-                  </Text>
-                </TouchableOpacity>
-              )}
+                    <Text style={{ color: colors.tint, fontWeight: "600", fontSize: 14 }}>
+                      Re‑scan networks
+                    </Text>
+                  </TouchableOpacity>
+                )}
 
-              {/* Manual entry toggle (always available) */}
-              {!manualSsid && (
                 <TouchableOpacity
                   onPress={() => setManualSsid(true)}
                   style={styles.wifiManualButton}
@@ -541,7 +542,7 @@ export default function AddDeviceScreen() {
                     Enter manually
                   </Text>
                 </TouchableOpacity>
-              )}
+              </View>
 
               {/* SSID input (only shown when manual or after selecting a network) */}
               {manualSsid && (
@@ -688,7 +689,7 @@ const styles = StyleSheet.create({
     bottom: 0,
     backgroundColor: "#00000066",
     justifyContent: "flex-start",
-    paddingTop: 80,
+    paddingTop: 20,
     alignItems: "center",
   },
   modal: {
@@ -728,13 +729,13 @@ const styles = StyleSheet.create({
   wifiScanningSection: {
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 18,
-    marginTop: 2,
+    marginBottom: 10,
+    marginTop: 0,
   },
   wifiListBox: {
-    height: 160,
-    minHeight: 120,
-    maxHeight: 180,
+    height: 60,
+    minHeight: 60,
+    maxHeight: 70,
     width: "100%",
     borderWidth: 1,
     borderColor: "#00000022",
@@ -764,5 +765,18 @@ const styles = StyleSheet.create({
     alignSelf: "center",
     marginBottom: 8,
     marginTop: 0,
+  },
+  wifiActionsRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    width: "100%",
+    marginBottom: 8,
+  },
+  wifiSpinnerCorner: {
+    position: "absolute",
+    top: 8,
+    left: 8,
+    zIndex: 10,
   },
 });

@@ -22,8 +22,15 @@
 #include <WiFiUdp.h>
 
 // ================= BLE =================
+
 #define SERVICE_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 #define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
+
+// ===== CLAIM (SECONDARY BLE FOR WIFI DEVICES) =====
+#define CLAIM_SERVICE_UUID "9b3a9f10-2c2e-4b6f-9f6a-9b4f5e7c1111"
+#define CLAIM_CHARACTERISTIC_UUID "9b3a9f10-2c2e-4b6f-9f6a-9b4f5e7c2222"
+
+BLECharacteristic *pClaimCharacteristic = nullptr;
 
 BLEServer *pServer = nullptr;
 BLECharacteristic *pCharacteristic = nullptr;
@@ -277,11 +284,59 @@ void factoryReset()
 }
 
 // ================= WIFI MODE =================
+
+// ===== CLAIM BLE CALLBACK =====
+class ClaimCharacteristicCallbacks : public BLECharacteristicCallbacks
+{
+  void onWrite(BLECharacteristic *c) override
+  {
+    String cmd = String(c->getValue().c_str());
+    cmd.trim();
+
+    if (cmd == "CLAIM")
+    {
+      String host = mdnsHost.length() ? mdnsHost : "petfeeder";
+      String reply = "HOST:" + host;
+
+      c->setValue(reply.c_str());
+      c->notify();
+
+      Serial.print("📤 CLAIM response sent: ");
+      Serial.println(reply);
+    }
+  }
+};
 void startWifiMode()
 {
   Serial.println("📡 Wi-Fi mode");
 
-  BLEDevice::deinit(true);
+  // Ensure BLE stack is initialised before creating claim server
+  BLEDevice::init("PetFeeder");
+
+
+  // ===== CLAIM BLE SERVICE (for "Other devices on network") =====
+  BLEServer *claimServer = BLEDevice::createServer();
+
+  BLEService *claimService = claimServer->createService(CLAIM_SERVICE_UUID);
+
+  pClaimCharacteristic = claimService->createCharacteristic(
+      CLAIM_CHARACTERISTIC_UUID,
+      BLECharacteristic::PROPERTY_READ |
+      BLECharacteristic::PROPERTY_WRITE |
+      BLECharacteristic::PROPERTY_NOTIFY
+  );
+
+  pClaimCharacteristic->addDescriptor(new BLE2902());
+
+  pClaimCharacteristic->setCallbacks(new ClaimCharacteristicCallbacks());
+
+  claimService->start();
+
+  BLEAdvertising *adv = BLEDevice::getAdvertising();
+  adv->addServiceUUID(CLAIM_SERVICE_UUID);
+  adv->start();
+
+  Serial.println("🔵 CLAIM BLE service advertised (Wi‑Fi mode)");
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(wifiSSID.c_str(), wifiPASS.c_str());
@@ -305,8 +360,6 @@ void startWifiMode()
   Serial.print("✅ IP: ");
   Serial.println(WiFi.localIP());
 
-  discoveryUdp.begin(DISCOVERY_PORT);
-  Serial.println("📡 UDP discovery started");
 
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
   delay(1500);
@@ -540,7 +593,6 @@ void startWifiMode()
     Serial.println("📥 HTTP /CANCEL_SCHEDULE called");
     hasSchedule = false;
     scheduledHour = -1;
-    moveLidClosed();  // ensure closed when scheduling
     scheduledMinute = -1;
     scheduleExecutedToday = false;
     saveSchedule();
@@ -783,11 +835,19 @@ void loop()
 
       if (hasSchedule && !scheduleExecutedToday && t.tm_hour == scheduledHour && t.tm_min == scheduledMinute)
       {
-
         Serial.println("🍽️ Executing scheduled feed");
         scheduledFeedBeep();
         moveLidOpen();
+
+        // Cancel schedule after execution (one‑time schedule)
+        hasSchedule = false;
+        scheduledHour = -1;
+        scheduledMinute = -1;
         scheduleExecutedToday = true;
+        saveSchedule();
+        notifySchedule();
+
+        Serial.println("🗑️ Schedule cleared after execution");
       }
 
       // Reset daily execution flag at midnight
@@ -817,9 +877,6 @@ void loop()
     discoveryUdp.beginPacket("255.255.255.255", DISCOVERY_PORT);
     discoveryUdp.print(payload);
     discoveryUdp.endPacket();
-
-    Serial.print("📢 UDP broadcast: ");
-    Serial.println(payload);
   }
 
   delay(50);

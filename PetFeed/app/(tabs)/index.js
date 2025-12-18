@@ -90,9 +90,18 @@ export default function HomeScreen() {
       if (currentDeviceUpdated && currentDeviceUpdated.online === false) {
         setCurrentId(currentDeviceUpdated.id); // keep currentId but UI will read online false
       }
+
+      // Also poll lid state continuously (every tick)
+      if (currentDeviceUpdated && currentDeviceUpdated.online) {
+        try {
+          const res = await fetch(`http://${currentDeviceUpdated.hostname}/GETSTATE`);
+          const json = await res.json();
+          setLidState(json.state);
+        } catch {}
+      }
     }
 
-    interval = setInterval(checkAllDevices, 5000);
+    interval = setInterval(checkAllDevices, 1000);
     checkAllDevices();
 
     return () => clearInterval(interval);

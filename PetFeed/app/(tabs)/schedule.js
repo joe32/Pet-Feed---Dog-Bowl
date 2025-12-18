@@ -1,4 +1,13 @@
-import { View, Text, TouchableOpacity, StyleSheet, Modal, Pressable, ScrollView, RefreshControl } from "react-native";
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  Modal,
+  Pressable,
+  ScrollView,
+  RefreshControl,
+} from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { useColorScheme } from "react-native";
 import { Colors } from "../../constants/theme";
@@ -96,6 +105,20 @@ export default function HomeScreen() {
     }
   }
 
+  // Lid state polling helper
+  async function fetchLidState() {
+    if (!currentDevice || !currentDevice.hostname) return;
+    try {
+      const res = await fetch(`http://${currentDevice.hostname}/GETSTATE`);
+      const data = await res.json();
+      if (data.state === "OPEN" || data.state === "CLOSED") {
+        setLidState(data.state);
+      }
+    } catch (e) {
+      console.log("Failed to fetch lid state", e);
+    }
+  }
+
   const loadDevices = useCallback(async () => {
     const saved = await AsyncStorage.getItem(STORAGE_KEY);
     const activeId = await AsyncStorage.getItem(ACTIVE_DEVICE_KEY);
@@ -104,18 +127,18 @@ export default function HomeScreen() {
     // Do not assume online is true; keep as is or false
     setDevices(parsed);
 
-    if (activeId && parsed.find(d => d.id === activeId)) {
+    if (activeId && parsed.find((d) => d.id === activeId)) {
       setCurrentId(activeId);
     } else {
       setCurrentId(null);
     }
   }, []);
 
-
   useFocusEffect(
     useCallback(() => {
       loadDevices();
       fetchScheduleState();
+      fetchLidState();
     }, [loadDevices])
   );
 
@@ -126,7 +149,7 @@ export default function HomeScreen() {
       if (devices.length === 0) return;
 
       const updatedDevices = await Promise.all(
-        devices.map(async device => {
+        devices.map(async (device) => {
           if (!device.hostname) return device;
           const isOnline = await pingDevice(device.hostname);
           return { ...device, online: isOnline };
@@ -136,22 +159,23 @@ export default function HomeScreen() {
       setDevices(updatedDevices);
 
       // If current device is offline, update UI immediately
-      const currentDeviceUpdated = updatedDevices.find(d => d.id === currentId);
+      const currentDeviceUpdated = updatedDevices.find(
+        (d) => d.id === currentId
+      );
       if (currentDeviceUpdated && currentDeviceUpdated.online === false) {
         setCurrentId(currentDeviceUpdated.id); // keep currentId but UI will read online false
       }
       if (currentDeviceUpdated && currentDeviceUpdated.online === true) {
         fetchScheduleState();
+        fetchLidState();
       }
     }
 
-    interval = setInterval(checkAllDevices, 5000);
+    interval = setInterval(checkAllDevices, 1000);
     checkAllDevices();
 
     return () => clearInterval(interval);
   }, [devices, currentId]);
-
-
 
   async function switchDevice(device) {
     setCurrentId(device.id);
@@ -160,7 +184,7 @@ export default function HomeScreen() {
     // Do not mark online here
   }
 
-  const currentDevice = devices.find(d => d.id === currentId);
+  const currentDevice = devices.find((d) => d.id === currentId);
 
   async function sendCommand(command) {
     if (!currentDevice || !currentDevice.hostname) return;
@@ -191,7 +215,7 @@ export default function HomeScreen() {
     // Force a full ping cycle
     if (devices.length > 0) {
       const updatedDevices = await Promise.all(
-        devices.map(async device => {
+        devices.map(async (device) => {
           if (!device.hostname) return device;
           const isOnline = await pingDevice(device.hostname);
           return { ...device, online: isOnline };
@@ -222,14 +246,17 @@ export default function HomeScreen() {
               <View
                 style={[
                   styles.statusDot,
-                  { backgroundColor: currentDevice.online ? "#3ddc84" : "#777" },
+                  {
+                    backgroundColor: currentDevice.online ? "#3ddc84" : "#777",
+                  },
                 ]}
               />
               <Text
                 style={{ color: colors.textSecondary, fontSize: 14 }}
                 numberOfLines={1}
               >
-                {currentDevice.name} · {currentDevice.online ? "Online" : "Offline"}
+                {currentDevice.name} ·{" "}
+                {currentDevice.online ? "Online" : "Offline"}
               </Text>
             </TouchableOpacity>
           ) : (
@@ -250,11 +277,24 @@ export default function HomeScreen() {
 
       <ScrollView
         style={{ flex: 1 }}
-        contentContainerStyle={{ flexGrow: 1, justifyContent: "center", alignItems: "center" }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
+        contentContainerStyle={{
+          flexGrow: 1,
+          justifyContent: "flex-start",
+          alignItems: "center",
+          marginTop: 60,
+        }}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
       >
         {currentDevice && (
-          <View style={{ flexDirection: "column", alignItems: "center", marginBottom: 16 }}>
+          <View
+            style={{
+              flexDirection: "column",
+              alignItems: "center",
+              marginBottom: 5,
+            }}
+          >
             {scheduledLabel && (
               <View style={{ marginBottom: 8 }}>
                 <Text style={{ color: colors.textSecondary, fontSize: 14 }}>
@@ -268,32 +308,26 @@ export default function HomeScreen() {
               </Text>
               <TouchableOpacity
                 onPress={() => sendCommand("OPEN")}
-                disabled={
-                  !currentDevice.online ||
-                  (lidState === "CLOSED")
-                }
+                disabled={!currentDevice.online || lidState === "CLOSED"}
                 style={{
                   paddingHorizontal: 10,
                   paddingVertical: 4,
                   borderRadius: 8,
                   backgroundColor: "#34C759",
                   opacity:
-                    !currentDevice.online || lidState === "CLOSED"
-                      ? 0.4
-                      : 1,
+                    !currentDevice.online || lidState === "CLOSED" ? 0.4 : 1,
                   marginRight: 6,
                 }}
               >
-                <Text style={{ color: "#000", fontSize: 12, fontWeight: "600" }}>
+                <Text
+                  style={{ color: "#000", fontSize: 12, fontWeight: "600" }}
+                >
                   Open
                 </Text>
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => sendCommand("CLOSE")}
-                disabled={
-                  !currentDevice.online ||
-                  (lidState === "OPEN")
-                }
+                disabled={!currentDevice.online || lidState === "OPEN"}
                 style={{
                   paddingHorizontal: 10,
                   paddingVertical: 4,
@@ -301,12 +335,12 @@ export default function HomeScreen() {
                   borderWidth: 1,
                   borderColor: "#ff3b30",
                   opacity:
-                    !currentDevice.online || lidState === "OPEN"
-                      ? 0.4
-                      : 1,
+                    !currentDevice.online || lidState === "OPEN" ? 0.4 : 1,
                 }}
               >
-                <Text style={{ color: "#ff3b30", fontSize: 12, fontWeight: "600" }}>
+                <Text
+                  style={{ color: "#ff3b30", fontSize: 12, fontWeight: "600" }}
+                >
                   Close
                 </Text>
               </TouchableOpacity>
@@ -340,17 +374,13 @@ export default function HomeScreen() {
             <TouchableOpacity
               onPress={scheduleFeed}
               disabled={
-                !currentDevice ||
-                !currentDevice.online ||
-                hasScheduledFeed
+                !currentDevice || !currentDevice.online || hasScheduledFeed
               }
               style={[
                 styles.primaryScheduleButton,
                 {
                   opacity:
-                    !currentDevice ||
-                    !currentDevice.online ||
-                    hasScheduledFeed
+                    !currentDevice || !currentDevice.online || hasScheduledFeed
                       ? 0.4
                       : 1,
                 },
@@ -361,20 +391,25 @@ export default function HomeScreen() {
 
             <TouchableOpacity
               onPress={cancelSchedule}
-              disabled={!currentDevice || !currentDevice.online || !hasScheduledFeed}
+              disabled={
+                !currentDevice || !currentDevice.online || !hasScheduledFeed
+              }
               style={[
                 styles.cancelScheduleButton,
                 {
                   opacity:
-                    !currentDevice || !currentDevice.online || !hasScheduledFeed ? 0.4 : 1,
+                    !currentDevice || !currentDevice.online || !hasScheduledFeed
+                      ? 0.4
+                      : 1,
                 },
               ]}
             >
-              <Text style={styles.cancelScheduleText}>Cancel Scheduled Feed</Text>
+              <Text style={styles.cancelScheduleText}>
+                Cancel Scheduled Feed
+              </Text>
             </TouchableOpacity>
           </View>
         </View>
-
       </ScrollView>
 
       {/* Dropdown */}
@@ -384,9 +419,12 @@ export default function HomeScreen() {
         animationType="fade"
         onRequestClose={() => setDropdownOpen(false)}
       >
-        <Pressable style={styles.overlay} onPress={() => setDropdownOpen(false)}>
+        <Pressable
+          style={styles.overlay}
+          onPress={() => setDropdownOpen(false)}
+        >
           <View style={[styles.dropdown, { backgroundColor: colors.card }]}>
-            {devices.map(device => (
+            {devices.map((device) => (
               <TouchableOpacity
                 key={device.id}
                 onPress={() => switchDevice(device)}
@@ -475,7 +513,7 @@ const styles = StyleSheet.create({
   scheduleCard: {
     width: "100%",
     maxWidth: 360,
-    marginTop: 32,
+    marginTop: 10,
     padding: 24,
     borderRadius: 28,
     backgroundColor: "#1c1c1e",
@@ -494,7 +532,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
     borderRadius: 999,
     backgroundColor: "#2c2c2e",
-    marginBottom: 24,
+    marginBottom: 40,
   },
 
   timeText: {

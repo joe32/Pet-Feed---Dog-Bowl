@@ -1,72 +1,92 @@
-import { Platform } from "react-native";
-import Constants from "expo-constants";
+import { NativeModules, Platform } from "react-native";
+import { BleManager } from "react-native-ble-plx";
+import { Buffer } from "buffer";
 
-let socket = null;
-let discoveryTimeout = null;
+const CLAIM_SERVICE_UUID = "9b3a9f10-2c2e-4b6f-9f6a-9b4f5e7c1111";
+const CLAIM_CHARACTERISTIC_UUID = "9b3a9f10-2c2e-4b6f-9f6a-9b4f5e7c2222";
 
-const isExpoGo =
-  Constants.appOwnership === "expo";
+let manager = null;
+let scanTimeout = null;
 
 export function startPetfeedDiscovery(onUpdate, onDone) {
-  // 🚫 Expo Go cannot do UDP
-  if (isExpoGo) {
-    if (onDone) {
-      setTimeout(onDone, 10000);
+  if (!manager) {
+    // Guard for Expo Go / environments without native BLE
+    if (!NativeModules.BleManager || Platform.OS === "web") {
+      // BLE not available, fail silently
+      if (onDone) onDone();
+      return;
     }
-    return;
+
+    manager = new BleManager();
   }
-
-  // 👇 Native builds only (TestFlight / Dev Client)
-  const dgram = require("react-native-udp");
-
-  if (socket) return;
 
   const foundMap = new Map();
 
-  socket = dgram.createSocket("udp4");
+  manager.startDeviceScan(
+    [CLAIM_SERVICE_UUID],
+    { allowDuplicates: false },
+    async (error, device) => {
+      if (error || !device) return;
 
-  socket.bind(41234);
+      try {
+        const connected = await device.connect();
+        const discovered = await connected.discoverAllServicesAndCharacteristics();
 
-  socket.on("message", (msg) => {
-    try {
-      const text = msg.toString();
-      if (!text.startsWith("PETFEED|")) return;
+        const services = await discovered.services();
+        const claimService = services.find(
+          (s) => s.uuid.toLowerCase() === CLAIM_SERVICE_UUID.toLowerCase()
+        );
+        if (!claimService) return;
 
-      const [, host, port] = text.split("|");
-      if (!host) return;
+        const chars = await claimService.characteristics();
+        const claimChar = chars.find(
+          (c) => c.uuid.toLowerCase() === CLAIM_CHARACTERISTIC_UUID.toLowerCase()
+        );
+        if (!claimChar) return;
 
-      if (!foundMap.has(host)) {
-        const device = {
+        await claimChar.writeWithResponse(
+          Buffer.from("CLAIM").toString("base64")
+        );
+
+        const value = await claimChar.read();
+        const decoded = Buffer.from(value.value, "base64").toString("utf8");
+
+        if (!decoded.startsWith("HOST:")) return;
+
+        const host = decoded.replace("HOST:", "").trim();
+        if (foundMap.has(host)) return;
+
+        const deviceObj = {
           id: host,
           name: host,
           host: `${host}.local`,
-          port: Number(port) || 80,
           online: true,
           connection: "Local device",
         };
 
-        foundMap.set(host, device);
+        foundMap.set(host, deviceObj);
         onUpdate(Array.from(foundMap.values()));
-      }
-    } catch {}
-  });
 
-  discoveryTimeout = setTimeout(() => {
+        await connected.cancelConnection();
+      } catch {}
+    }
+  );
+
+  scanTimeout = setTimeout(() => {
     stopPetfeedDiscovery();
     if (onDone) onDone();
   }, 10000);
 }
 
 export function stopPetfeedDiscovery() {
-  if (discoveryTimeout) {
-    clearTimeout(discoveryTimeout);
-    discoveryTimeout = null;
+  if (scanTimeout) {
+    clearTimeout(scanTimeout);
+    scanTimeout = null;
   }
 
-  if (socket) {
+  if (manager) {
     try {
-      socket.close();
+      manager.stopDeviceScan();
     } catch {}
-    socket = null;
   }
 }

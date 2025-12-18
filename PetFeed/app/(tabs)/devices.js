@@ -496,7 +496,7 @@ function retryDiscovery() {
                   style={{ marginRight: 8 }}
                 />
                 <Text style={{ color: colors.textSecondary }}>
-                  Scanning your network…
+                  Scanning nearby devices via Bluetooth…
                 </Text>
               </View>
             )}
