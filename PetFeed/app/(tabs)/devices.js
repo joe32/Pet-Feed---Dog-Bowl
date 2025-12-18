@@ -77,37 +77,37 @@ export default function DevicesScreen() {
 
   // 🔧 DEV ONLY — seed fake devices for Expo Go testing
   
-  useEffect(() => {
-    (async () => {
-      const fakeDevices = [
-        {
-          id: "dev-001",
-          name: "Kitchen Feeder",
-          host: "petfeeder-kitchen",
-          mode: "wifi",
-          online: true,
-        },
-        {
-          id: "dev-002",
-          name: "Garage Feeder",
-          host: "petfeeder-garage",
-          mode: "wifi",
-          online: false,
-        },
-        {
-          id: "dev-003",
-          name: "Holiday Feeder",
-          host: "petfeeder-holiday",
-          mode: "wifi",
-          online: true,
-        },
-      ];
+  // useEffect(() => {
+  //   (async () => {
+  //     const fakeDevices = [
+  //       {
+  //         id: "dev-001",
+  //         name: "Kitchen Feeder",
+  //         host: "petfeeder-kitchen",
+  //         mode: "wifi",
+  //         online: true,
+  //       },
+  //       {
+  //         id: "dev-002",
+  //         name: "Garage Feeder",
+  //         host: "petfeeder-garage",
+  //         mode: "wifi",
+  //         online: false,
+  //       },
+  //       {
+  //         id: "dev-003",
+  //         name: "Holiday Feeder",
+  //         host: "petfeeder-holiday",
+  //         mode: "wifi",
+  //         online: true,
+  //       },
+  //     ];
 
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(fakeDevices));
-      await AsyncStorage.setItem(ACTIVE_DEVICE_KEY, "dev-001");
-      await loadDevices();
-    })();
-  }, []);
+  //     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(fakeDevices));
+  //     await AsyncStorage.setItem(ACTIVE_DEVICE_KEY, "dev-001");
+  //     await loadDevices();
+  //   })();
+  // }, []);
 
   // 🔁 Re-sync active device when returning to this screen
   useFocusEffect(
