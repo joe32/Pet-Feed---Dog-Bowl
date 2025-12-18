@@ -7,8 +7,11 @@ let stateListeners = [];
 
 const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
 const WIFI_CHAR_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
+const CLAIM_SERVICE_UUID = "9b3a9f10-2c2e-4b6f-9f6a-9b4f5e7c1111";
+const CLAIM_CHARACTERISTIC_UUID = "9b3a9f10-2c2e-4b6f-9f6a-9b4f5e7c2222";
 
 let manager = null;
+let scanMode = "default"; // "default" | "claim"
 let connectedDevice = null;
 let connectionListeners = [];
 
@@ -45,6 +48,10 @@ export function getConnectedDevice() {
 
 /* -------------------- SCANNING -------------------- */
 
+export function setBleScanMode(mode) {
+  scanMode = mode === "claim" ? "claim" : "default";
+}
+
 export async function startScan(onDeviceFound, onError) {
   const ble = getBleManager();
 
@@ -55,8 +62,11 @@ export async function startScan(onDeviceFound, onError) {
     return;
   }
 
+  const serviceFilter =
+    scanMode === "claim" ? [CLAIM_SERVICE_UUID] : [SERVICE_UUID];
+
   ble.startDeviceScan(
-    [SERVICE_UUID], // FILTER: only PetFeed devices
+    serviceFilter, // FILTER: only PetFeed devices
     { allowDuplicates: false },
     (error, device) => {
       if (error) {
@@ -131,12 +141,16 @@ export async function sendWifiCredentials(ssid, password) {
     throw new Error("No device connected");
   }
 
-  const payload = `WIFI:ssid=${ssid};pass=${password}`;
-  const base64Payload = Buffer.from(payload, "utf8").toString("base64");
+  const serviceUuid =
+    scanMode === "claim" ? CLAIM_SERVICE_UUID : SERVICE_UUID;
+  const charUuid =
+    scanMode === "claim" ? CLAIM_CHARACTERISTIC_UUID : WIFI_CHAR_UUID;
+
+  const base64Payload = Buffer.from(ssid, "utf8").toString("base64");
 
   await connectedDevice.writeCharacteristicWithResponseForService(
-    SERVICE_UUID,
-    WIFI_CHAR_UUID,
+    serviceUuid,
+    charUuid,
     base64Payload
   );
 }

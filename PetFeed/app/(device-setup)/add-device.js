@@ -64,9 +64,9 @@ export default function AddDeviceScreen() {
 
   // test to show popup on expo.
 
-  useEffect(() => {
-    setSetupStep("wifi");
-  }, []);
+  // useEffect(() => {
+  //   setSetupStep("wifi");
+  // }, []);
 
 useEffect(() => {
   if (setupStep === "wifi") {

@@ -308,14 +308,13 @@ export default function HomeScreen() {
               </Text>
               <TouchableOpacity
                 onPress={() => sendCommand("OPEN")}
-                disabled={!currentDevice.online || lidState === "CLOSED"}
+                disabled={!currentDevice.online}
                 style={{
                   paddingHorizontal: 10,
                   paddingVertical: 4,
                   borderRadius: 8,
                   backgroundColor: "#34C759",
-                  opacity:
-                    !currentDevice.online || lidState === "CLOSED" ? 0.4 : 1,
+                  opacity: !currentDevice.online ? 0.4 : 1,
                   marginRight: 6,
                 }}
               >
@@ -327,15 +326,14 @@ export default function HomeScreen() {
               </TouchableOpacity>
               <TouchableOpacity
                 onPress={() => sendCommand("CLOSE")}
-                disabled={!currentDevice.online || lidState === "OPEN"}
+                disabled={!currentDevice.online}
                 style={{
                   paddingHorizontal: 10,
                   paddingVertical: 4,
                   borderRadius: 8,
                   borderWidth: 1,
                   borderColor: "#ff3b30",
-                  opacity:
-                    !currentDevice.online || lidState === "OPEN" ? 0.4 : 1,
+                  opacity: !currentDevice.online ? 0.4 : 1,
                 }}
               >
                 <Text

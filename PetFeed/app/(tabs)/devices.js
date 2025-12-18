@@ -19,7 +19,12 @@ import {
   Swipeable,
   GestureHandlerRootView,
 } from "react-native-gesture-handler";
-import { startPetfeedDiscovery, stopPetfeedDiscovery } from "../network/petfeedDiscovery";
+import {
+  initBle,
+  startScan,
+  stopScan,
+  setBleScanMode,
+} from "../ble/bleManager";
 
 const STORAGE_KEY = "PETFEED_DEVICES";
 const ACTIVE_DEVICE_KEY = "PETFEED_ACTIVE_DEVICE";
@@ -75,6 +80,12 @@ export default function DevicesScreen() {
     loadDevices();
   }, [loadDevices]);
 
+  useEffect(() => {
+    try {
+      initBle();
+    } catch {}
+  }, []);
+
   // 🔧 DEV ONLY — seed fake devices for Expo Go testing
   
   // useEffect(() => {
@@ -122,32 +133,44 @@ export default function DevicesScreen() {
   );
 
 
-useFocusEffect(
-  useCallback(() => {
-    setScanning(true);
-    setScanTimedOut(false);
-    setOtherDevices([]);
+  useFocusEffect(
+    useCallback(() => {
+      setScanning(true);
+      setScanTimedOut(false);
+      setOtherDevices([]);
 
-    stopPetfeedDiscovery();
+      // Switch BLE into CLAIM mode for "other devices"
+      setBleScanMode("claim");
+      stopScan();
 
-    startPetfeedDiscovery((found) => {
-      const existingHosts = new Set(devices.map(d => d.host));
-      const filtered = found.filter(d => !existingHosts.has(d.host));
-      setOtherDevices(filtered);
-    });
+      startScan(
+        (device) => {
+          setOtherDevices((prev) => {
+            if (prev.find((d) => d.id === device.id)) return prev;
+            return [
+              ...prev,
+              {
+                id: device.id,
+                name: device.name || "PetFeed device",
+              },
+            ];
+          });
+        },
+        () => {}
+      );
 
-    const timeout = setTimeout(() => {
-      stopPetfeedDiscovery();
-      setScanning(false);
-      setScanTimedOut(true);
-    }, 10000);
+      const timeout = setTimeout(() => {
+        stopScan();
+        setScanning(false);
+        setScanTimedOut(true);
+      }, 10000);
 
-    return () => {
-      clearTimeout(timeout);
-      stopPetfeedDiscovery();
-    };
-  }, [devices])
-);
+      return () => {
+        clearTimeout(timeout);
+        stopScan();
+      };
+    }, [])
+  );
 
   useEffect(() => {
     const id = setInterval(async () => {
@@ -404,19 +427,31 @@ IP Address: Unknown`,
   }
 
 function retryDiscovery() {
-  stopPetfeedDiscovery();
   setOtherDevices([]);
   setScanTimedOut(false);
   setScanning(true);
 
-  startPetfeedDiscovery((found) => {
-    const existingHosts = new Set(devices.map(d => d.host));
-    const filtered = found.filter(d => !existingHosts.has(d.host));
-    setOtherDevices(filtered);
-  });
+  setBleScanMode("claim");
+  stopScan();
+
+  startScan(
+    (device) => {
+      setOtherDevices((prev) => {
+        if (prev.find((d) => d.id === device.id)) return prev;
+        return [
+          ...prev,
+          {
+            id: device.id,
+            name: device.name || "PetFeed device",
+          },
+        ];
+      });
+    },
+    () => {}
+  );
 
   setTimeout(() => {
-    stopPetfeedDiscovery();
+    stopScan();
     setScanning(false);
     setScanTimedOut(true);
   }, 10000);
@@ -424,11 +459,11 @@ function retryDiscovery() {
 
   function renderOtherDevice(device) {
     return (
-      <View key={device.host} style={[styles.card, { backgroundColor: colors.card, opacity: 0.9 }]}>
+      <View key={device.id} style={[styles.card, { backgroundColor: colors.card, opacity: 0.9 }]}>
         <View style={[styles.statusDot, { backgroundColor: "#34C759" }]} />
         <View style={{ flex: 1 }}>
           <Text style={[styles.deviceName, { color: colors.text }]}>
-            {device.host}
+            {device.name}
           </Text>
           <Text style={{ color: colors.textSecondary, fontSize: 14 }}>
             Other device on your network
@@ -436,10 +471,7 @@ function retryDiscovery() {
         </View>
         <TouchableOpacity
           onPress={() => {
-            router.push({
-              pathname: "/(device-setup)/add-device",
-              params: { discoveredHost: device.host },
-            });
+            router.push("/(device-setup)/add-device");
           }}
         >
           <Text style={{ color: colors.tint, fontWeight: "600" }}>Add</Text>
