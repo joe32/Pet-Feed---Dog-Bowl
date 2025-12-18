@@ -5,7 +5,7 @@ import { Colors } from "../../constants/theme";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { startScan, stopScan, connectToDevice, sendWifiCredentials } from "../ble/bleManager";
+import { startScan, stopScan, connectToDevice, sendWifiCredentials, writeCommand, subscribeToNotifications } from "../ble/bleManager";
 
 // Helper to generate a random hostname
 function generateHostname() {
@@ -38,6 +38,39 @@ export default function AddDeviceScreen() {
   const [wifiStep, setWifiStep] = useState(false);
   const [ssid, setSsid] = useState("");
   const [password, setPassword] = useState("");
+  const [wifiNetworks, setWifiNetworks] = useState([]);
+  const [manualSsid, setManualSsid] = useState(false);
+  const [loadingWifi, setLoadingWifi] = useState(false);
+  // UI-only placeholder for Wi-Fi scan (replace with BLE → ESP Wi‑Fi scan)
+  async function scanWifiNetworks() {
+    setLoadingWifi(true);
+    setWifiNetworks([]);
+
+    try {
+      // Listen for Wi-Fi scan results from ESP
+      const unsubscribe = await subscribeToNotifications((value) => {
+        if (typeof value !== "string") return;
+        if (!value.startsWith("WIFISCAN:")) return;
+
+        const payload = value.replace("WIFISCAN:", "");
+        if (!payload || payload === "EMPTY") {
+          setWifiNetworks([]);
+        } else {
+          const nets = payload.split(",").filter(Boolean);
+          setWifiNetworks(nets);
+        }
+
+        setLoadingWifi(false);
+        unsubscribe?.();
+      });
+
+      // Request Wi-Fi scan from ESP
+      await writeCommand("WIFISCAN");
+    } catch (e) {
+      console.log("Wi-Fi scan failed:", e);
+      setLoadingWifi(false);
+    }
+  }
 
   // Track the generated hostname during setup
   const [generatedHost, setGeneratedHost] = useState(null);
@@ -317,6 +350,7 @@ export default function AddDeviceScreen() {
                 onPress={() => {
                   if (connectionMode === "wifi") {
                     setSetupStep("wifi");
+                    scanWifiNetworks();
                   }
                 }}
               >
@@ -343,18 +377,65 @@ export default function AddDeviceScreen() {
               <Text style={[styles.subtitle, { color: colors.textSecondary, marginBottom: 18 }]}>
                 Enter your home Wi‑Fi details to connect your feeder to your network.
               </Text>
-              <TextInput
-                value={ssid}
-                onChangeText={setSsid}
-                style={[
-                  styles.input,
-                  { color: colors.text, borderColor: colors.tint, marginBottom: 12 },
-                ]}
-                placeholder="Wi‑Fi name (SSID)"
-                placeholderTextColor={colors.textSecondary}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
+
+              {!manualSsid && (
+                <>
+                  {loadingWifi ? (
+                    <ActivityIndicator
+                      size="small"
+                      color={colors.tint}
+                      style={{ marginBottom: 16 }}
+                    />
+                  ) : (
+                    wifiNetworks.map((net) => (
+                      <TouchableOpacity
+                        key={net}
+                        style={[
+                          styles.modeRow,
+                          {
+                            borderColor:
+                              ssid === net ? colors.tint : "#00000022",
+                          },
+                        ]}
+                        onPress={() => setSsid(net)}
+                      >
+                        <Text style={{ color: colors.text }}>{net}</Text>
+                        {ssid === net && (
+                          <Text style={{ color: colors.tint }}>✓</Text>
+                        )}
+                      </TouchableOpacity>
+                    ))
+                  )}
+
+                  <TouchableOpacity
+                    style={{ marginTop: 12 }}
+                    onPress={() => {
+                      setManualSsid(true);
+                      setSsid("");
+                    }}
+                  >
+                    <Text style={{ color: colors.tint }}>
+                      Enter network manually
+                    </Text>
+                  </TouchableOpacity>
+                </>
+              )}
+
+              {manualSsid && (
+                <TextInput
+                  value={ssid}
+                  onChangeText={setSsid}
+                  style={[
+                    styles.input,
+                    { color: colors.text, borderColor: colors.tint, marginBottom: 12 },
+                  ]}
+                  placeholder="Wi‑Fi name (SSID)"
+                  placeholderTextColor={colors.textSecondary}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              )}
+
               <TextInput
                 value={password}
                 onChangeText={setPassword}

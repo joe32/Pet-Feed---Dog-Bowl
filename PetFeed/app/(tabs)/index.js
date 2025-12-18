@@ -5,6 +5,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useEffect, useState, useCallback } from "react";
 import { useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { writeCommand, subscribeToNotifications } from "../ble/bleManager";
 
 const STORAGE_KEY = "PETFEED_DEVICES";
 const ACTIVE_DEVICE_KEY = "PETFEED_ACTIVE_DEVICE";
@@ -17,6 +18,7 @@ export default function HomeScreen() {
   const [currentId, setCurrentId] = useState(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [lidState, setLidState] = useState(null);
 
   async function pingDevice(hostname) {
     try {
@@ -52,6 +54,7 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       loadDevices();
+      requestLidState();
     }, [loadDevices])
   );
 
@@ -117,6 +120,36 @@ export default function HomeScreen() {
     }
   }
 
+  async function requestLidState() {
+    if (!currentDevice || !currentDevice.online) return;
+
+    try {
+      await writeCommand("GETSTATE");
+    } catch (e) {
+      console.log("Failed to request lid state", e);
+    }
+  }
+
+  useEffect(() => {
+    let unsubscribe;
+
+    async function subscribe() {
+      unsubscribe = await subscribeToNotifications((value) => {
+        if (typeof value !== "string") return;
+        if (!value.startsWith("STATE:")) return;
+
+        const state = value.replace("STATE:", "");
+        setLidState(state);
+      });
+    }
+
+    subscribe();
+
+    return () => {
+      unsubscribe?.();
+    };
+  }, []);
+
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     // Force a full ping cycle
@@ -131,8 +164,19 @@ export default function HomeScreen() {
       setDevices(updatedDevices);
     }
     await loadDevices();
+    await requestLidState();
     setRefreshing(false);
   }, [devices, loadDevices]);
+
+  useEffect(() => {
+    if (!currentDevice || !currentDevice.online) return;
+
+    const id = setInterval(() => {
+      requestLidState();
+    }, 10000);
+
+    return () => clearInterval(id);
+  }, [currentDevice?.id, currentDevice?.online]);
 
   return (
     <SafeAreaView
@@ -184,30 +228,67 @@ export default function HomeScreen() {
         contentContainerStyle={{ flexGrow: 1, justifyContent: "center", alignItems: "center" }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        <View style={styles.controlRow}>
-          <TouchableOpacity
-            onPress={() => sendCommand("OPEN")}
-            style={[
-              styles.controlButton,
-              { backgroundColor: colors.tint },
-            ]}
-          >
-            <Text style={{ color: colors.background, fontSize: 18, fontWeight: "600" }}>
-              Open
-            </Text>
-          </TouchableOpacity>
+        <View style={styles.controlCard}>
+          <Text style={[styles.lidLabel, { color: colors.textSecondary }]}>
+            LID STATUS
+          </Text>
 
-          <TouchableOpacity
-            onPress={() => sendCommand("CLOSE")}
-            style={[
-              styles.controlButton,
-              { backgroundColor: colors.tint },
-            ]}
-          >
-            <Text style={{ color: colors.background, fontSize: 18, fontWeight: "600" }}>
-              Close
+          <View style={styles.lidStatePill}>
+            <View
+              style={[
+                styles.lidDot,
+                {
+                  backgroundColor:
+                    lidState === "OPEN"
+                      ? "#34C759"
+                      : lidState === "CLOSED"
+                      ? "#ff3b30"
+                      : "#8e8e93",
+                },
+              ]}
+            />
+            <Text style={[styles.lidStateText, { color: colors.text }]}>
+              {lidState
+                ? lidState === "OPEN"
+                  ? "Open"
+                  : "Closed"
+                : "Unknown"}
             </Text>
-          </TouchableOpacity>
+          </View>
+
+          <View style={styles.buttonGroup}>
+            <TouchableOpacity
+              onPress={() => sendCommand("OPEN")}
+              style={[
+                styles.primaryButton,
+                {
+                  backgroundColor: "#34C759",
+                  opacity:
+                    !currentDevice?.online || lidState === "OPEN" ? 0.4 : 1,
+                },
+              ]}
+              disabled={!currentDevice?.online || lidState === "OPEN"}
+            >
+              <Text style={styles.primaryButtonText}>Open Lid</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => sendCommand("CLOSE")}
+              style={[
+                styles.secondaryButton,
+                {
+                  borderColor: "#ff3b30",
+                  opacity:
+                    !currentDevice?.online || lidState === "CLOSED" ? 0.4 : 1,
+                },
+              ]}
+              disabled={!currentDevice?.online || lidState === "CLOSED"}
+            >
+              <Text style={[styles.secondaryButtonText, { color: "#ff3b30" }]}>
+                Close Lid
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
       </ScrollView>
 
@@ -315,5 +396,72 @@ const styles = StyleSheet.create({
     flexDirection: "column",
     gap: 16,
     alignItems: "center",
+  },
+
+  controlCard: {
+    width: "100%",
+    maxWidth: 360,
+    padding: 24,
+    borderRadius: 28,
+    backgroundColor: "#1c1c1e",
+    alignItems: "center",
+  },
+
+  lidLabel: {
+    fontSize: 12,
+    letterSpacing: 1.2,
+    fontWeight: "600",
+    marginBottom: 12,
+  },
+
+  lidStatePill: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: "#2c2c2e",
+    marginBottom: 32,
+  },
+
+  lidDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 10,
+  },
+
+  lidStateText: {
+    fontSize: 20,
+    fontWeight: "600",
+  },
+
+  buttonGroup: {
+    width: "100%",
+    gap: 16,
+  },
+
+  primaryButton: {
+    paddingVertical: 18,
+    borderRadius: 18,
+    alignItems: "center",
+  },
+
+  primaryButtonText: {
+    color: "#000",
+    fontSize: 18,
+    fontWeight: "700",
+  },
+
+  secondaryButton: {
+    paddingVertical: 16,
+    borderRadius: 18,
+    borderWidth: 2,
+    alignItems: "center",
+  },
+
+  secondaryButtonText: {
+    fontSize: 17,
+    fontWeight: "600",
   },
 });
