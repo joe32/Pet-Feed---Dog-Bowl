@@ -1,11 +1,31 @@
-import { View, Text, TouchableOpacity, StyleSheet, FlatList, ActivityIndicator, Alert, TextInput, KeyboardAvoidingView, Platform } from "react-native";
+import {
+  View,
+  Text,
+  TouchableOpacity,
+  StyleSheet,
+  FlatList,
+  ActivityIndicator,
+  Alert,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  ScrollView,
+} from "react-native";
 import { useColorScheme } from "react-native";
 import { useState, useRef, useEffect } from "react";
 import { Colors } from "../../constants/theme";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useRouter } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { startScan, stopScan, connectToDevice, sendWifiCredentials, writeCommand, subscribeToNotifications } from "../ble/bleManager";
+import {
+  initBle,
+  startScan,
+  stopScan,
+  connectToDevice,
+  sendWifiCredentials,
+  writeCommand,
+  subscribeToNotifications,
+} from "../ble/bleManager";
 
 // Helper to generate a random hostname
 function generateHostname() {
@@ -34,20 +54,21 @@ export default function AddDeviceScreen() {
   // "wifi" | "cloud"
   const [connectionMode, setConnectionMode] = useState(null);
 
-  // Wi-Fi step state
-  const [wifiStep, setWifiStep] = useState(false);
+  // Wi‑Fi step state
   const [ssid, setSsid] = useState("");
   const [password, setPassword] = useState("");
   const [wifiNetworks, setWifiNetworks] = useState([]);
   const [manualSsid, setManualSsid] = useState(false);
   const [loadingWifi, setLoadingWifi] = useState(false);
-  // UI-only placeholder for Wi-Fi scan (replace with BLE → ESP Wi‑Fi scan)
+  const [wifiTimedOut, setWifiTimedOut] = useState(false);
+  
   async function scanWifiNetworks() {
     setLoadingWifi(true);
+    setWifiTimedOut(false);
     setWifiNetworks([]);
 
+    let timeout;
     try {
-      // Listen for Wi-Fi scan results from ESP
       const unsubscribe = await subscribeToNotifications((value) => {
         if (typeof value !== "string") return;
         if (!value.startsWith("WIFISCAN:")) return;
@@ -61,14 +82,22 @@ export default function AddDeviceScreen() {
         }
 
         setLoadingWifi(false);
+        clearTimeout(timeout);
         unsubscribe?.();
       });
 
-      // Request Wi-Fi scan from ESP
+      // request scan
       await writeCommand("WIFISCAN");
+
+      // hard timeout (10s)
+      timeout = setTimeout(() => {
+        setLoadingWifi(false);
+        setWifiTimedOut(true);
+        unsubscribe?.();
+      }, 10000);
     } catch (e) {
-      console.log("Wi-Fi scan failed:", e);
       setLoadingWifi(false);
+      setWifiTimedOut(true);
     }
   }
 
@@ -85,6 +114,15 @@ export default function AddDeviceScreen() {
         timeoutRef.current = null;
       }
     };
+  }, []);
+
+  useEffect(() => {
+    // Pre-initialise BLE so the first scan works reliably
+    try {
+      initBle();
+    } catch (e) {
+      console.log("BLE init skipped / not available:", e);
+    }
   }, []);
 
   async function beginScan() {
@@ -129,7 +167,7 @@ export default function AddDeviceScreen() {
     const saved = savedRaw ? JSON.parse(savedRaw) : [];
 
     const updated = [
-      ...saved.filter(d => d.id !== device.id),
+      ...saved.filter((d) => d.id !== device.id),
       {
         id: device.id,
         name,
@@ -148,10 +186,7 @@ export default function AddDeviceScreen() {
 
   return (
     <SafeAreaView
-      style={[
-        styles.container,
-        { backgroundColor: colors.background },
-      ]}
+      style={[styles.container, { backgroundColor: colors.background }]}
     >
       <View style={styles.content}>
         <Text style={[styles.title, { color: colors.text }]}>
@@ -183,19 +218,19 @@ export default function AddDeviceScreen() {
               <ActivityIndicator color={colors.background} />
             </View>
           ) : (
-            <Text
-              style={[
-                styles.buttonText,
-                { color: colors.background },
-              ]}
-            >
+            <Text style={[styles.buttonText, { color: colors.background }]}>
               Start scanning
             </Text>
           )}
         </TouchableOpacity>
 
         {!scanning && timedOut && devices.length === 0 && (
-          <Text style={[styles.subtitle, { color: colors.textSecondary, marginTop: 24 }]}>
+          <Text
+            style={[
+              styles.subtitle,
+              { color: colors.textSecondary, marginTop: 24 },
+            ]}
+          >
             No devices found
           </Text>
         )}
@@ -211,7 +246,13 @@ export default function AddDeviceScreen() {
                   {item.name || "Unknown device"}
                 </Text>
                 <TouchableOpacity
-                  style={[styles.connectButton, { borderColor: colors.tint, opacity: connectingId ? 0.6 : 1 }]}
+                  style={[
+                    styles.connectButton,
+                    {
+                      borderColor: colors.tint,
+                      opacity: connectingId ? 0.6 : 1,
+                    },
+                  ]}
                   onPress={async () => {
                     if (connectingId) return;
 
@@ -231,12 +272,11 @@ export default function AddDeviceScreen() {
                       setScanning(false);
                       setTimedOut(false);
                       setConnectedId(item.id);
-                  setPendingDevice(item);
-                  const host = generateHostname();
-                  setGeneratedHost(host);
-                  setDeviceName(item.name || "Pet Feeder");
-                  setSetupStep("name");
-
+                      setPendingDevice(item);
+                      const host = generateHostname();
+                      setGeneratedHost(host);
+                      setDeviceName(item.name || "Pet Feeder");
+                      setSetupStep("name");
                     } catch (e) {
                       console.log("Connect failed:", e);
                       Alert.alert(
@@ -253,14 +293,23 @@ export default function AddDeviceScreen() {
                       ✓ Connected
                     </Text>
                   ) : connectingId === item.id ? (
-                    <View style={{ flexDirection: "row", alignItems: "center" }}>
+                    <View
+                      style={{ flexDirection: "row", alignItems: "center" }}
+                    >
                       <ActivityIndicator size="small" color={colors.tint} />
-                      <Text style={[styles.connectText, { color: colors.tint, marginLeft: 8 }]}>
+                      <Text
+                        style={[
+                          styles.connectText,
+                          { color: colors.tint, marginLeft: 8 },
+                        ]}
+                      >
                         Connecting
                       </Text>
                     </View>
                   ) : (
-                    <Text style={[styles.connectText, { color: colors.tint }]}>Connect</Text>
+                    <Text style={[styles.connectText, { color: colors.tint }]}>
+                      Connect
+                    </Text>
                   )}
                 </TouchableOpacity>
               </View>
@@ -276,7 +325,9 @@ export default function AddDeviceScreen() {
             keyboardVerticalOffset={80}
             style={{ width: "100%", alignItems: "center" }}
           >
-            <View style={[styles.modal, { backgroundColor: colors.background }]}>
+            <View
+              style={[styles.modal, { backgroundColor: colors.background }]}
+            >
               <Text style={[styles.modalTitle, { color: colors.text }]}>
                 Name your feeder
               </Text>
@@ -310,14 +361,20 @@ export default function AddDeviceScreen() {
             keyboardVerticalOffset={80}
             style={{ width: "100%", alignItems: "center" }}
           >
-            <View style={[styles.modal, { backgroundColor: colors.background }]}>
+            <View
+              style={[styles.modal, { backgroundColor: colors.background }]}
+            >
               <Text style={[styles.modalTitle, { color: colors.text }]}>
                 Choose connection type
               </Text>
               {[
                 { key: "wifi", label: "Wi‑Fi (local)", enabled: true },
-                { key: "cloud", label: "Cloud (control from anywhere)", enabled: false },
-              ].map(option => (
+                {
+                  key: "cloud",
+                  label: "Cloud (control from anywhere)",
+                  enabled: false,
+                },
+              ].map((option) => (
                 <TouchableOpacity
                   key={option.key}
                   disabled={!option.enabled}
@@ -327,7 +384,9 @@ export default function AddDeviceScreen() {
                     {
                       opacity: option.enabled ? 1 : 0.4,
                       borderColor:
-                        connectionMode === option.key ? colors.tint : "#00000022",
+                        connectionMode === option.key
+                          ? colors.tint
+                          : "#00000022",
                     },
                   ]}
                 >
@@ -374,57 +433,146 @@ export default function AddDeviceScreen() {
               <Text style={[styles.modalTitle, { color: colors.text }]}>
                 Connect feeder to Wi‑Fi
               </Text>
-              <Text style={[styles.subtitle, { color: colors.textSecondary, marginBottom: 18 }]}>
-                Enter your home Wi‑Fi details to connect your feeder to your network.
+              <Text
+                style={[
+                  styles.subtitle,
+                  { color: colors.textSecondary, marginBottom: 18 },
+                ]}
+              >
+                Enter your home Wi‑Fi details to connect your feeder to your
+                network.
               </Text>
 
+              {/* Scanning indicator */}
               {loadingWifi && (
-                <ActivityIndicator
-                  size="small"
-                  color={colors.tint}
-                  style={{ marginBottom: 16 }}
-                />
+                <View style={styles.wifiScanningSection}>
+                  <ActivityIndicator size="large" color={colors.tint} />
+                  <Text
+                    style={{
+                      color: colors.textSecondary,
+                      marginTop: 12,
+                      fontWeight: "600",
+                      fontSize: 16,
+                      textAlign: "center",
+                    }}
+                  >
+                    Scanning for Wi‑Fi networks…
+                  </Text>
+                </View>
               )}
 
-              {!loadingWifi && wifiNetworks.length > 0 &&
-                wifiNetworks.map((net) => (
-                  <TouchableOpacity
-                    key={net}
-                    style={[
-                      styles.modeRow,
-                      {
-                        borderColor:
-                          ssid === net ? colors.tint : "#00000022",
-                      },
-                    ]}
-                    onPress={() => setSsid(net)}
+              {/* Wi-Fi networks list container */}
+              <View style={styles.wifiListBox}>
+                {loadingWifi ? (
+                  // Show nothing in the box while scanning, spinner is above
+                  null
+                ) : wifiNetworks.length > 0 ? (
+                  <ScrollView
+                    style={{ flex: 1 }}
+                    contentContainerStyle={{ paddingVertical: 0 }}
+                    showsVerticalScrollIndicator={true}
                   >
-                    <Text style={{ color: colors.text }}>{net}</Text>
-                    {ssid === net && (
-                      <Text style={{ color: colors.tint }}>✓</Text>
-                    )}
-                  </TouchableOpacity>
-                ))}
+                    {wifiNetworks.map((net) => (
+                      <TouchableOpacity
+                        key={net}
+                        style={[
+                          styles.modeRow,
+                          {
+                            borderColor:
+                              ssid === net ? colors.tint : "#00000022",
+                            marginTop: 0,
+                            marginBottom: 8,
+                          },
+                        ]}
+                        onPress={() => {
+                          setSsid(net);
+                          setManualSsid(true);
+                        }}
+                      >
+                        <Text style={{ color: colors.text }}>{net}</Text>
+                        {ssid === net && (
+                          <Text style={{ color: colors.tint }}>✓</Text>
+                        )}
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                ) : (
+                  !loadingWifi && (
+                    <View style={styles.wifiNoNetworksBox}>
+                      <Text
+                        style={{
+                          color: colors.textSecondary,
+                          fontSize: 16,
+                          textAlign: "center",
+                        }}
+                      >
+                        No networks found
+                      </Text>
+                    </View>
+                  )
+                )}
+              </View>
 
-              <TextInput
-                value={ssid}
-                onChangeText={setSsid}
-                style={[
-                  styles.input,
-                  { color: colors.text, borderColor: colors.tint, marginBottom: 12 },
-                ]}
-                placeholder="Wi‑Fi name (SSID)"
-                placeholderTextColor={colors.textSecondary}
-                autoCapitalize="none"
-                autoCorrect={false}
-              />
+              {/* Re-scan button: always visible after initial scan finishes */}
+              {!loadingWifi && (
+                <TouchableOpacity
+                  onPress={scanWifiNetworks}
+                  style={styles.wifiRescanButton}
+                >
+                  <Text
+                    style={{
+                      color: colors.tint,
+                      fontWeight: "600",
+                      fontSize: 14,
+                    }}
+                  >
+                    Re‑scan networks
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              {/* Manual entry toggle (always available) */}
+              {!manualSsid && (
+                <TouchableOpacity
+                  onPress={() => setManualSsid(true)}
+                  style={styles.wifiManualButton}
+                >
+                  <Text style={{ color: colors.tint, fontWeight: "600" }}>
+                    Enter manually
+                  </Text>
+                </TouchableOpacity>
+              )}
+
+              {/* SSID input (only shown when manual or after selecting a network) */}
+              {manualSsid && (
+                <TextInput
+                  value={ssid}
+                  onChangeText={setSsid}
+                  style={[
+                    styles.input,
+                    {
+                      color: colors.text,
+                      borderColor: colors.tint,
+                      marginBottom: 12,
+                    },
+                  ]}
+                  placeholder="Wi‑Fi name (SSID)"
+                  placeholderTextColor={colors.textSecondary}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              )}
 
               <TextInput
                 value={password}
                 onChangeText={setPassword}
                 style={[
                   styles.input,
-                  { color: colors.text, borderColor: colors.tint, marginBottom: 18 },
+                  {
+                    color: colors.text,
+                    borderColor: colors.tint,
+                    marginBottom: 18,
+                  },
                 ]}
                 placeholder="Wi‑Fi password"
                 placeholderTextColor={colors.textSecondary}
@@ -454,7 +602,7 @@ export default function AddDeviceScreen() {
                   }
 
                   // Small delay to allow write to flush before BLE drops
-                  await new Promise(r => setTimeout(r, 300));
+                  await new Promise((r) => setTimeout(r, 300));
 
                   // Persist device locally (do NOT store password)
                   await saveDeviceAndReturn(
@@ -575,5 +723,46 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderRadius: 12,
     marginTop: 10,
+  },
+  // --- Wi-Fi step additions ---
+  wifiScanningSection: {
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 18,
+    marginTop: 2,
+  },
+  wifiListBox: {
+    height: 160,
+    minHeight: 120,
+    maxHeight: 180,
+    width: "100%",
+    borderWidth: 1,
+    borderColor: "#00000022",
+    borderRadius: 14,
+    marginBottom: 12,
+    backgroundColor: "#fafbfc",
+    overflow: "hidden",
+    paddingHorizontal: 6,
+    justifyContent: "center",
+  },
+  wifiNoNetworksBox: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    height: "100%",
+    width: "100%",
+  },
+  wifiRescanButton: {
+    alignSelf: "center",
+    marginBottom: 10,
+    marginTop: 0,
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+  },
+  wifiManualButton: {
+    alignSelf: "center",
+    marginBottom: 8,
+    marginTop: 0,
   },
 });

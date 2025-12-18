@@ -2,6 +2,9 @@ import { BleManager } from "react-native-ble-plx";
 import { Platform } from "react-native";
 import { Buffer } from "buffer";
 
+let bleState = "Unknown";
+let stateListeners = [];
+
 const SERVICE_UUID = "4fafc201-1fb5-459e-8fcc-c5c9c331914b";
 const WIFI_CHAR_UUID = "beb5483e-36e1-4688-b7f5-ea07361b26a8";
 
@@ -12,6 +15,11 @@ let connectionListeners = [];
 export function getBleManager() {
   if (!manager) {
     manager = new BleManager();
+
+    manager.onStateChange((state) => {
+      bleState = state;
+      stateListeners.forEach((cb) => cb(state));
+    }, true);
   }
   return manager;
 }
@@ -37,8 +45,15 @@ export function getConnectedDevice() {
 
 /* -------------------- SCANNING -------------------- */
 
-export function startScan(onDeviceFound, onError) {
+export async function startScan(onDeviceFound, onError) {
   const ble = getBleManager();
+
+  try {
+    await waitForBlePoweredOn();
+  } catch (e) {
+    if (onError) onError(e);
+    return;
+  }
 
   ble.startDeviceScan(
     [SERVICE_UUID], // FILTER: only PetFeed devices
@@ -135,4 +150,42 @@ export function destroyBleManager() {
     connectedDevice = null;
     connectionListeners = [];
   }
+}
+
+export function initBle() {
+  getBleManager();
+}
+
+export function getBleState() {
+  return bleState;
+}
+
+export function waitForBlePoweredOn(timeoutMs = 5000) {
+  return new Promise((resolve, reject) => {
+    if (bleState === "PoweredOn") {
+      resolve();
+      return;
+    }
+
+    const start = Date.now();
+
+    const unsub = subscribeToBleState((state) => {
+      if (state === "PoweredOn") {
+        unsub();
+        resolve();
+      } else if (Date.now() - start > timeoutMs) {
+        unsub();
+        reject(new Error("Bluetooth not powered on"));
+      }
+    });
+  });
+}
+
+function subscribeToBleState(cb) {
+  stateListeners.push(cb);
+  cb(bleState);
+
+  return () => {
+    stateListeners = stateListeners.filter((c) => c !== cb);
+  };
 }

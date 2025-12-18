@@ -1,60 +1,72 @@
-// network/petfeedDiscovery.js
-// Responsible for discovering PetFeed devices on the local network via mDNS
+import { Platform } from "react-native";
+import Constants from "expo-constants";
 
-let discoveryInterval = null;
+let socket = null;
+let discoveryTimeout = null;
 
-export function startPetfeedDiscovery(onUpdate) {
-  if (discoveryInterval) return;
+const isExpoGo =
+  Constants.appOwnership === "expo";
 
-  discoveryInterval = setInterval(async () => {
-    try {
-      // iOS does not allow enumerating mDNS services directly.
-      // We probe a bounded set of likely PetFeed hostnames instead.
-      const candidates = [];
-
-      for (let i = 0; i < 20; i++) {
-        candidates.push(`petfeeder-${i}.local`);
-      }
-
-      const found = [];
-
-      for (const host of candidates) {
-        try {
-          const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 1500);
-
-          const res = await fetch(`http://${host}/ping`, {
-            signal: controller.signal,
-          });
-
-          clearTimeout(timeout);
-
-          if (res.ok) {
-            found.push({
-              id: host,
-              name: host.replace(".local", ""),
-              host,
-              online: true,
-              connection: "Local device",
-            });
-          }
-        } catch {
-          // not reachable
-        }
-      }
-
-      if (found.length > 0) {
-        onUpdate(found);
-      }
-    } catch (e) {
-      console.log("PetFeed discovery error", e);
+export function startPetfeedDiscovery(onUpdate, onDone) {
+  // 🚫 Expo Go cannot do UDP
+  if (isExpoGo) {
+    if (onDone) {
+      setTimeout(onDone, 10000);
     }
-  }, 5000);
+    return;
+  }
+
+  // 👇 Native builds only (TestFlight / Dev Client)
+  const dgram = require("react-native-udp");
+
+  if (socket) return;
+
+  const foundMap = new Map();
+
+  socket = dgram.createSocket("udp4");
+
+  socket.bind(41234);
+
+  socket.on("message", (msg) => {
+    try {
+      const text = msg.toString();
+      if (!text.startsWith("PETFEED|")) return;
+
+      const [, host, port] = text.split("|");
+      if (!host) return;
+
+      if (!foundMap.has(host)) {
+        const device = {
+          id: host,
+          name: host,
+          host: `${host}.local`,
+          port: Number(port) || 80,
+          online: true,
+          connection: "Local device",
+        };
+
+        foundMap.set(host, device);
+        onUpdate(Array.from(foundMap.values()));
+      }
+    } catch {}
+  });
+
+  discoveryTimeout = setTimeout(() => {
+    stopPetfeedDiscovery();
+    if (onDone) onDone();
+  }, 10000);
 }
 
 export function stopPetfeedDiscovery() {
-  if (discoveryInterval) {
-    clearInterval(discoveryInterval);
-    discoveryInterval = null;
+  if (discoveryTimeout) {
+    clearTimeout(discoveryTimeout);
+    discoveryTimeout = null;
+  }
+
+  if (socket) {
+    try {
+      socket.close();
+    } catch {}
+    socket = null;
   }
 }

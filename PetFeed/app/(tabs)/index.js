@@ -5,7 +5,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useEffect, useState, useCallback } from "react";
 import { useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { writeCommand, subscribeToNotifications } from "../ble/bleManager";
 
 const STORAGE_KEY = "PETFEED_DEVICES";
 const ACTIVE_DEVICE_KEY = "PETFEED_ACTIVE_DEVICE";
@@ -51,10 +50,22 @@ export default function HomeScreen() {
     }
   }, []);
 
+  async function fetchLidState() {
+    if (!currentDevice || !currentDevice.hostname) return;
+
+    try {
+      const res = await fetch(`http://${currentDevice.hostname}/GETSTATE`);
+      const json = await res.json();
+      setLidState(json.state);
+    } catch (e) {
+      console.log("Failed to fetch lid state", e);
+    }
+  }
+
   useFocusEffect(
     useCallback(() => {
       loadDevices();
-      requestLidState();
+      fetchLidState();
     }, [loadDevices])
   );
 
@@ -120,36 +131,6 @@ export default function HomeScreen() {
     }
   }
 
-  async function requestLidState() {
-    if (!currentDevice || !currentDevice.online) return;
-
-    try {
-      await writeCommand("GETSTATE");
-    } catch (e) {
-      console.log("Failed to request lid state", e);
-    }
-  }
-
-  useEffect(() => {
-    let unsubscribe;
-
-    async function subscribe() {
-      unsubscribe = await subscribeToNotifications((value) => {
-        if (typeof value !== "string") return;
-        if (!value.startsWith("STATE:")) return;
-
-        const state = value.replace("STATE:", "");
-        setLidState(state);
-      });
-    }
-
-    subscribe();
-
-    return () => {
-      unsubscribe?.();
-    };
-  }, []);
-
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     // Force a full ping cycle
@@ -164,19 +145,9 @@ export default function HomeScreen() {
       setDevices(updatedDevices);
     }
     await loadDevices();
-    await requestLidState();
+    await fetchLidState();
     setRefreshing(false);
   }, [devices, loadDevices]);
-
-  useEffect(() => {
-    if (!currentDevice || !currentDevice.online) return;
-
-    const id = setInterval(() => {
-      requestLidState();
-    }, 10000);
-
-    return () => clearInterval(id);
-  }, [currentDevice?.id, currentDevice?.online]);
 
   return (
     <SafeAreaView
@@ -263,11 +234,8 @@ export default function HomeScreen() {
                 styles.primaryButton,
                 {
                   backgroundColor: "#34C759",
-                  opacity:
-                    !currentDevice?.online || lidState === "OPEN" ? 0.4 : 1,
                 },
               ]}
-              disabled={!currentDevice?.online || lidState === "OPEN"}
             >
               <Text style={styles.primaryButtonText}>Open Lid</Text>
             </TouchableOpacity>
@@ -278,11 +246,8 @@ export default function HomeScreen() {
                 styles.secondaryButton,
                 {
                   borderColor: "#ff3b30",
-                  opacity:
-                    !currentDevice?.online || lidState === "CLOSED" ? 0.4 : 1,
                 },
               ]}
-              disabled={!currentDevice?.online || lidState === "CLOSED"}
             >
               <Text style={[styles.secondaryButtonText, { color: "#ff3b30" }]}>
                 Close Lid

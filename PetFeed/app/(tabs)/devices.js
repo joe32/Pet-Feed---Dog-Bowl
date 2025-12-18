@@ -121,11 +121,13 @@ export default function DevicesScreen() {
     }, [])
   );
 
-useEffect(() => {
+
+useFocusEffect(
+  useCallback(() => {
     setScanning(true);
     setScanTimedOut(false);
+    setOtherDevices([]);
 
-    // Stop any previous scan before starting a new one
     stopPetfeedDiscovery();
 
     startPetfeedDiscovery((found) => {
@@ -144,7 +146,8 @@ useEffect(() => {
       clearTimeout(timeout);
       stopPetfeedDiscovery();
     };
-  }, []);
+  }, [devices])
+);
 
   useEffect(() => {
     const id = setInterval(async () => {

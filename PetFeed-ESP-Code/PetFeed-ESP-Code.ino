@@ -19,6 +19,7 @@
 #include <ArduinoJson.h>
 #include <ESPmDNS.h>
 #include <ArduinoOTA.h>
+#include <WiFiUdp.h>
 
 // ================= BLE =================
 #define SERVICE_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
@@ -38,6 +39,15 @@ String wifiPASS = "";
 String mdnsHost = "";
 String deviceMode = "ble";
 
+WiFiUDP discoveryUdp;
+const uint16_t DISCOVERY_PORT = 4210;
+unsigned long lastDiscoveryBroadcast = 0;
+
+// ================= WIFI SCAN STATE =================
+unsigned long wifiScanStart = 0;
+bool wifiScanActive = false;
+String lastWifiScanResult = "";
+
 // ================= TIME =================
 int lastPrintedMinute = -1;
 int lastPrintedHour = -1;
@@ -51,6 +61,32 @@ void setUKTimezone()
 {
   setenv("TZ", "GMT0BST,M3.5.0/1,M10.5.0/2", 1);
   tzset();
+}
+
+void performWifiScan(bool verboseSerial)
+{
+  Serial.println("📡 Starting Wi‑Fi scan");
+  int n = WiFi.scanNetworks(/*async=*/false, /*hidden=*/true);
+  lastWifiScanResult = "";
+
+  if (n <= 0)
+  {
+    Serial.println("⚠️ No Wi‑Fi networks found");
+    return;
+  }
+
+  for (int i = 0; i < n; i++)
+  {
+    lastWifiScanResult += WiFi.SSID(i);
+    if (i < n - 1)
+      lastWifiScanResult += ",";
+  }
+
+  if (verboseSerial)
+  {
+    Serial.print("📶 Networks found: ");
+    Serial.println(lastWifiScanResult);
+  }
 }
 
 // ================= SERVO =================
@@ -144,6 +180,7 @@ void loadSchedule()
 // ================= HELPER: NOTIFY SCHEDULE =================
 void notifySchedule()
 {
+  // NOTE: BLE notification only; app now relies on HTTP GETSCHEDULE
   if (!pCharacteristic)
     return;
 
@@ -268,6 +305,9 @@ void startWifiMode()
   Serial.print("✅ IP: ");
   Serial.println(WiFi.localIP());
 
+  discoveryUdp.begin(DISCOVERY_PORT);
+  Serial.println("📡 UDP discovery started");
+
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
   delay(1500);
   setUKTimezone();
@@ -288,6 +328,10 @@ void startWifiMode()
       Serial.println("❌ mDNS failed to start");
     }
   }
+
+  Serial.print("📢 Discovery identity: ");
+  Serial.print(mdnsHost.length() ? mdnsHost : "petfeeder");
+  Serial.println(".local");
 
   // OTA: enable mDNS so Arduino IDE can discover OTA
   // This does NOT replace or break our existing MDNS.begin(mdnsHost)
@@ -318,6 +362,37 @@ void startWifiMode()
 
   server.on("/ping", []()
             { server.send(200, "application/json", "{\"type\":\"petfeed\"}"); });
+
+  // ================= WIFI SCAN (APP) =================
+  server.on("/WIFISCAN", HTTP_GET, []()
+  {
+    Serial.println("📥 HTTP /WIFISCAN called");
+
+    performWifiScan(false);
+
+    StaticJsonDocument<512> doc;
+    JsonArray arr = doc.createNestedArray("networks");
+
+    if (lastWifiScanResult.length())
+    {
+      int start = 0;
+      while (true)
+      {
+        int idx = lastWifiScanResult.indexOf(",", start);
+        if (idx == -1)
+        {
+          arr.add(lastWifiScanResult.substring(start));
+          break;
+        }
+        arr.add(lastWifiScanResult.substring(start, idx));
+        start = idx + 1;
+      }
+    }
+
+    String res;
+    serializeJson(doc, res);
+    server.send(200, "application/json", res);
+  });
 
   server.on("/command", HTTP_POST, []()
             {
@@ -400,26 +475,38 @@ void startWifiMode()
     ESP.restart(); });
 
   // ================= GET SCHEDULE (APP) =================
-  server.on("/GETSCHEDULE", HTTP_POST, []()
+  server.on("/GETSCHEDULE", HTTP_GET, []()
   {
+    StaticJsonDocument<128> doc;
+
     if (!hasSchedule)
     {
-      server.send(200, "text/plain", "SCHEDULE:NONE");
+      doc["hasSchedule"] = false;
+      String res;
+      serializeJson(doc, res);
+      server.send(200, "application/json", res);
       Serial.println("📤 GETSCHEDULE → NONE");
       return;
     }
 
-    char buf[32];
-    sprintf(buf, "SCHEDULED:%02d:%02d", scheduledHour, scheduledMinute);
+    doc["hasSchedule"] = true;
+    doc["hour"] = scheduledHour;
+    doc["minute"] = scheduledMinute;
 
-    server.send(200, "text/plain", buf);
+    String res;
+    serializeJson(doc, res);
+    server.send(200, "application/json", res);
+
     Serial.print("📤 GETSCHEDULE → ");
-    Serial.println(buf);
+    Serial.print(scheduledHour);
+    Serial.print(":");
+    Serial.println(scheduledMinute);
   });
 
   // ================= SCHEDULE HTTP ROUTES =================
   server.on("/SCHEDULE", HTTP_POST, []()
             {
+    Serial.println("📥 HTTP /SCHEDULE called");
     if (!server.hasArg("plain")) {
       server.send(400, "text/plain", "no body");
       return;
@@ -428,6 +515,8 @@ void startWifiMode()
     StaticJsonDocument<128> doc;
     deserializeJson(doc, server.arg("plain"));
     String time = doc["time"] | "";
+    Serial.print("📥 Scheduled time received: ");
+    Serial.println(time);
 
     int colon = time.indexOf(":");
     if (colon < 0) {
@@ -443,10 +532,12 @@ void startWifiMode()
     saveSchedule();
     notifySchedule();
     confirmBeep();
+    Serial.println("✅ Schedule saved successfully");
     server.send(200, "application/json", "{\"status\":\"scheduled\"}"); });
 
   server.on("/CANCEL_SCHEDULE", HTTP_POST, []()
             {
+    Serial.println("📥 HTTP /CANCEL_SCHEDULE called");
     hasSchedule = false;
     scheduledHour = -1;
     moveLidClosed();  // ensure closed when scheduling
@@ -455,6 +546,7 @@ void startWifiMode()
     saveSchedule();
     notifySchedule();
     beep(900, 120);
+    Serial.println("🗑️ Schedule cancelled");
     server.send(200, "application/json", "{\"status\":\"cancelled\"}"); });
 
   server.begin();
@@ -628,7 +720,7 @@ void setup()
     return;
   }
 
-  BLEDevice::init("PetFeeder1");
+  BLEDevice::init("PetFeeder");
   pServer = BLEDevice::createServer();
   pServer->setCallbacks(new ServerCallbacks());
 
@@ -663,6 +755,16 @@ void loop()
     {
       factoryReset();
       ESP.restart();
+    }
+    if (cmd == "network")
+    {
+      Serial.println("🧪 Serial Wi‑Fi scan (5s test)");
+      unsigned long start = millis();
+      while (millis() - start < 5000)
+      {
+        performWifiScan(true);
+        delay(1000);
+      }
     }
   }
 
@@ -704,6 +806,20 @@ void loop()
   if (deviceMode == "wifi")
   {
     ArduinoOTA.handle();
+  }
+
+  if (deviceMode == "wifi" && millis() - lastDiscoveryBroadcast > 3000) {
+    lastDiscoveryBroadcast = millis();
+
+    String host = mdnsHost.length() ? mdnsHost : "petfeeder";
+    String payload = "PETFEED|" + host + "|80";
+
+    discoveryUdp.beginPacket("255.255.255.255", DISCOVERY_PORT);
+    discoveryUdp.print(payload);
+    discoveryUdp.endPacket();
+
+    Serial.print("📢 UDP broadcast: ");
+    Serial.println(payload);
   }
 
   delay(50);

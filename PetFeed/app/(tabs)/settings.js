@@ -29,16 +29,25 @@ export default function SettingsScreen() {
 
   const confirmClearDevices = () => {
     Alert.alert(
-      "Clear all devices",
-      "This will remove all saved devices from this app. This cannot be undone.",
+      "Clear saved devices",
+      "Do you want to just remove devices from this app, or also factory reset the devices themselves?",
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Clear",
+          text: "Remove from app only",
+          style: "default",
+          onPress: async () => {
+            await AsyncStorage.removeItem("PETFEED_DEVICES");
+            await AsyncStorage.removeItem("PETFEED_ACTIVE_DEVICE");
+          },
+        },
+        {
+          text: "Factory reset devices",
           style: "destructive",
           onPress: async () => {
             await factoryResetAllDevices();
             await AsyncStorage.removeItem("PETFEED_DEVICES");
+            await AsyncStorage.removeItem("PETFEED_ACTIVE_DEVICE");
           },
         },
       ]
@@ -48,11 +57,11 @@ export default function SettingsScreen() {
   const confirmClearAppData = () => {
     Alert.alert(
       "Clear all app data",
-      "This will reset the app to its default state. This cannot be undone.",
+      "This will factory reset all devices and completely reset the app. This cannot be undone.",
       [
         { text: "Cancel", style: "cancel" },
         {
-          text: "Clear",
+          text: "Clear everything",
           style: "destructive",
           onPress: async () => {
             await factoryResetAllDevices();

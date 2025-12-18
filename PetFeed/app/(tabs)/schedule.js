@@ -6,7 +6,6 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useEffect, useState, useCallback } from "react";
 import { useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { writeCommand } from "../ble/bleManager";
 
 const STORAGE_KEY = "PETFEED_DEVICES";
 const ACTIVE_DEVICE_KEY = "PETFEED_ACTIVE_DEVICE";
@@ -33,17 +32,13 @@ export default function HomeScreen() {
     const minutes = scheduledTime.getMinutes().toString().padStart(2, "0");
     const timeStr = `${hours}:${minutes}`;
 
-    // Optimistically update UI (works even in Expo Go)
-    setHasScheduledFeed(true);
-    setScheduledLabel(
-      scheduledTime.toLocaleTimeString([], {
-        hour: "2-digit",
-        minute: "2-digit",
-      })
-    );
-
     try {
-      await writeCommand(`SCHEDULE:${timeStr}`);
+      await fetch(`http://${currentDevice.hostname}/SCHEDULE`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ time: timeStr }),
+      });
+      await fetchScheduleState();
     } catch (e) {
       console.log("Failed to schedule feed", e);
     }
@@ -52,12 +47,11 @@ export default function HomeScreen() {
   async function cancelSchedule() {
     if (!currentDevice || !currentDevice.online) return;
 
-    // Optimistically update UI (works even in Expo Go)
-    setHasScheduledFeed(false);
-    setScheduledLabel(null);
-
     try {
-      await writeCommand("CANCEL_SCHEDULE");
+      await fetch(`http://${currentDevice.hostname}/CANCEL_SCHEDULE`, {
+        method: "POST",
+      });
+      await fetchScheduleState();
     } catch (e) {
       console.log("Failed to cancel schedule", e);
     }
@@ -79,6 +73,29 @@ export default function HomeScreen() {
     }
   }
 
+  async function fetchScheduleState() {
+    if (!currentDevice || !currentDevice.hostname) return;
+    try {
+      const res = await fetch(`http://${currentDevice.hostname}/GETSCHEDULE`);
+      const data = await res.json();
+      if (data.hasSchedule === true) {
+        setHasScheduledFeed(true);
+        if (data.hour !== undefined && data.minute !== undefined) {
+          const hh = data.hour.toString().padStart(2, "0");
+          const mm = data.minute.toString().padStart(2, "0");
+          setScheduledLabel(`${hh}:${mm}`);
+        } else {
+          setScheduledLabel(null);
+        }
+      } else if (data.hasSchedule === false) {
+        setHasScheduledFeed(false);
+        setScheduledLabel(null);
+      }
+    } catch (e) {
+      console.log("Failed to fetch schedule state", e);
+    }
+  }
+
   const loadDevices = useCallback(async () => {
     const saved = await AsyncStorage.getItem(STORAGE_KEY);
     const activeId = await AsyncStorage.getItem(ACTIVE_DEVICE_KEY);
@@ -94,33 +111,11 @@ export default function HomeScreen() {
     }
   }, []);
 
-  async function requestLidState() {
-    if (!currentDevice || !currentDevice.online) return;
-
-    try {
-      await writeCommand("GETSTATE");
-    } catch (e) {
-      console.log("Failed to request lid state", e);
-    }
-  }
-
-  async function requestScheduleStatus() {
-    if (!currentDevice || !currentDevice.online) return;
-
-    try {
-      await writeCommand("GETSCHEDULE");
-      // ESP will later respond with:
-      // SCHEDULED:HH:MM  or  SCHEDULE:NONE
-    } catch (e) {
-      console.log("Failed to request schedule status", e);
-    }
-  }
 
   useFocusEffect(
     useCallback(() => {
       loadDevices();
-      requestLidState();
-      requestScheduleStatus();
+      fetchScheduleState();
     }, [loadDevices])
   );
 
@@ -145,6 +140,9 @@ export default function HomeScreen() {
       if (currentDeviceUpdated && currentDeviceUpdated.online === false) {
         setCurrentId(currentDeviceUpdated.id); // keep currentId but UI will read online false
       }
+      if (currentDeviceUpdated && currentDeviceUpdated.online === true) {
+        fetchScheduleState();
+      }
     }
 
     interval = setInterval(checkAllDevices, 5000);
@@ -154,16 +152,6 @@ export default function HomeScreen() {
   }, [devices, currentId]);
 
 
-  useEffect(() => {
-    if (!currentDevice || !currentDevice.online) return;
-
-    const id = setInterval(() => {
-      requestLidState();
-      requestScheduleStatus();
-    }, 10000);
-
-    return () => clearInterval(id);
-  }, [currentDevice?.id, currentDevice?.online]);
 
   async function switchDevice(device) {
     setCurrentId(device.id);
@@ -212,8 +200,6 @@ export default function HomeScreen() {
       setDevices(updatedDevices);
     }
     await loadDevices();
-    await requestLidState();
-    await requestScheduleStatus();
     setRefreshing(false);
   }, [devices, loadDevices]);
 
@@ -354,17 +340,17 @@ export default function HomeScreen() {
             <TouchableOpacity
               onPress={scheduleFeed}
               disabled={
-                !currentDevice?.online ||
-                hasScheduledFeed ||
-                scheduledLabel !== null
+                !currentDevice ||
+                !currentDevice.online ||
+                hasScheduledFeed
               }
               style={[
                 styles.primaryScheduleButton,
                 {
                   opacity:
-                    !currentDevice?.online ||
-                    hasScheduledFeed ||
-                    scheduledLabel !== null
+                    !currentDevice ||
+                    !currentDevice.online ||
+                    hasScheduledFeed
                       ? 0.4
                       : 1,
                 },
@@ -375,12 +361,12 @@ export default function HomeScreen() {
 
             <TouchableOpacity
               onPress={cancelSchedule}
-              disabled={!currentDevice?.online || !hasScheduledFeed}
+              disabled={!currentDevice || !currentDevice.online || !hasScheduledFeed}
               style={[
                 styles.cancelScheduleButton,
                 {
                   opacity:
-                    !currentDevice?.online || !hasScheduledFeed ? 0.4 : 1,
+                    !currentDevice || !currentDevice.online || !hasScheduledFeed ? 0.4 : 1,
                 },
               ]}
             >
