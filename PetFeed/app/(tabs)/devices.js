@@ -7,6 +7,7 @@ import {
   Alert,
   RefreshControl,
   ScrollView,
+  ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useColorScheme } from "react-native";
@@ -46,6 +47,8 @@ export default function DevicesScreen() {
   const [activeDeviceId, setActiveDeviceId] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [otherDevices, setOtherDevices] = useState([]);
+  const [scanning, setScanning] = useState(true);
+  const [scanTimedOut, setScanTimedOut] = useState(false);
 
   const loadDevices = useCallback(async () => {
     const saved = await AsyncStorage.getItem(STORAGE_KEY);
@@ -68,11 +71,12 @@ export default function DevicesScreen() {
     }
   }, []);
 
-  // useEffect(() => {
-  //   loadDevices();
-  // }, [loadDevices]);
+  useEffect(() => {
+    loadDevices();
+  }, [loadDevices]);
 
   // 🔧 DEV ONLY — seed fake devices for Expo Go testing
+  
   useEffect(() => {
     (async () => {
       const fakeDevices = [
@@ -117,18 +121,30 @@ export default function DevicesScreen() {
     }, [])
   );
 
-  useEffect(() => {
+useEffect(() => {
+    setScanning(true);
+    setScanTimedOut(false);
+
+    // Stop any previous scan before starting a new one
+    stopPetfeedDiscovery();
+
     startPetfeedDiscovery((found) => {
-      // exclude devices already in My Devices
-      const existingHosts = devices.map(d => d.host);
-      const filtered = found.filter(d => !existingHosts.includes(d.host));
+      const existingHosts = new Set(devices.map(d => d.host));
+      const filtered = found.filter(d => !existingHosts.has(d.host));
       setOtherDevices(filtered);
     });
 
+    const timeout = setTimeout(() => {
+      stopPetfeedDiscovery();
+      setScanning(false);
+      setScanTimedOut(true);
+    }, 10000);
+
     return () => {
+      clearTimeout(timeout);
       stopPetfeedDiscovery();
     };
-  }, [devices]);
+  }, []);
 
   useEffect(() => {
     const id = setInterval(async () => {
@@ -384,6 +400,25 @@ IP Address: Unknown`,
     );
   }
 
+function retryDiscovery() {
+  stopPetfeedDiscovery();
+  setOtherDevices([]);
+  setScanTimedOut(false);
+  setScanning(true);
+
+  startPetfeedDiscovery((found) => {
+    const existingHosts = new Set(devices.map(d => d.host));
+    const filtered = found.filter(d => !existingHosts.has(d.host));
+    setOtherDevices(filtered);
+  });
+
+  setTimeout(() => {
+    stopPetfeedDiscovery();
+    setScanning(false);
+    setScanTimedOut(true);
+  }, 10000);
+}
+
   function renderOtherDevice(device) {
     return (
       <View key={device.host} style={[styles.card, { backgroundColor: colors.card, opacity: 0.9 }]}>
@@ -443,16 +478,41 @@ IP Address: Unknown`,
           ) : (
             <>
               {devices.map(renderDevice)}
-              {otherDevices.length > 0 && (
-                <View style={{ marginTop: 32 }}>
-                  <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
-                    Other devices on your network
-                  </Text>
-                  {otherDevices.map(renderOtherDevice)}
-                </View>
-              )}
             </>
           )}
+          <View style={{ marginTop: 32 }}>
+            <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+              Other devices on your network
+            </Text>
+
+            {scanning && (
+              <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 12 }}>
+                <ActivityIndicator
+                  size="small"
+                  color={colors.textSecondary}
+                  style={{ marginRight: 8 }}
+                />
+                <Text style={{ color: colors.textSecondary }}>
+                  Scanning your network…
+                </Text>
+              </View>
+            )}
+
+            {!scanning && scanTimedOut && otherDevices.length === 0 && (
+              <View style={{ marginBottom: 12 }}>
+                <Text style={{ color: colors.textSecondary, marginBottom: 6 }}>
+                  No other PetFeed devices found
+                </Text>
+                <TouchableOpacity onPress={retryDiscovery}>
+                  <Text style={{ color: colors.tint, fontWeight: "600" }}>
+                    Retry scan
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {otherDevices.map(renderOtherDevice)}
+          </View>
         </ScrollView>
       </SafeAreaView>
     </GestureHandlerRootView>

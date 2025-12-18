@@ -6,7 +6,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useEffect, useState, useCallback } from "react";
 import { useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { writeCommand, subscribeToNotifications } from "../ble/bleManager";
+import { writeCommand } from "../ble/bleManager";
 
 const STORAGE_KEY = "PETFEED_DEVICES";
 const ACTIVE_DEVICE_KEY = "PETFEED_ACTIVE_DEVICE";
@@ -153,38 +153,6 @@ export default function HomeScreen() {
     return () => clearInterval(interval);
   }, [devices, currentId]);
 
-  useEffect(() => {
-    let unsubscribe;
-
-    async function subscribe() {
-      unsubscribe = await subscribeToNotifications((value) => {
-        if (value.startsWith("STATE:")) {
-          const state = value.replace("STATE:", "");
-          setLidState(state);
-          return;
-        }
-
-        if (value.startsWith("SCHEDULED:")) {
-          const time = value.replace("SCHEDULED:", "");
-          setHasScheduledFeed(true);
-          setScheduledLabel(time);
-          return;
-        }
-
-        if (value === "SCHEDULE:NONE") {
-          setHasScheduledFeed(false);
-          setScheduledLabel(null);
-          return;
-        }
-      });
-    }
-
-    subscribe();
-
-    return () => {
-      unsubscribe?.();
-    };
-  }, []);
 
   useEffect(() => {
     if (!currentDevice || !currentDevice.online) return;

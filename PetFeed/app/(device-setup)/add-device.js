@@ -378,63 +378,46 @@ export default function AddDeviceScreen() {
                 Enter your home Wi‑Fi details to connect your feeder to your network.
               </Text>
 
-              {!manualSsid && (
-                <>
-                  {loadingWifi ? (
-                    <ActivityIndicator
-                      size="small"
-                      color={colors.tint}
-                      style={{ marginBottom: 16 }}
-                    />
-                  ) : (
-                    wifiNetworks.map((net) => (
-                      <TouchableOpacity
-                        key={net}
-                        style={[
-                          styles.modeRow,
-                          {
-                            borderColor:
-                              ssid === net ? colors.tint : "#00000022",
-                          },
-                        ]}
-                        onPress={() => setSsid(net)}
-                      >
-                        <Text style={{ color: colors.text }}>{net}</Text>
-                        {ssid === net && (
-                          <Text style={{ color: colors.tint }}>✓</Text>
-                        )}
-                      </TouchableOpacity>
-                    ))
-                  )}
-
-                  <TouchableOpacity
-                    style={{ marginTop: 12 }}
-                    onPress={() => {
-                      setManualSsid(true);
-                      setSsid("");
-                    }}
-                  >
-                    <Text style={{ color: colors.tint }}>
-                      Enter network manually
-                    </Text>
-                  </TouchableOpacity>
-                </>
-              )}
-
-              {manualSsid && (
-                <TextInput
-                  value={ssid}
-                  onChangeText={setSsid}
-                  style={[
-                    styles.input,
-                    { color: colors.text, borderColor: colors.tint, marginBottom: 12 },
-                  ]}
-                  placeholder="Wi‑Fi name (SSID)"
-                  placeholderTextColor={colors.textSecondary}
-                  autoCapitalize="none"
-                  autoCorrect={false}
+              {loadingWifi && (
+                <ActivityIndicator
+                  size="small"
+                  color={colors.tint}
+                  style={{ marginBottom: 16 }}
                 />
               )}
+
+              {!loadingWifi && wifiNetworks.length > 0 &&
+                wifiNetworks.map((net) => (
+                  <TouchableOpacity
+                    key={net}
+                    style={[
+                      styles.modeRow,
+                      {
+                        borderColor:
+                          ssid === net ? colors.tint : "#00000022",
+                      },
+                    ]}
+                    onPress={() => setSsid(net)}
+                  >
+                    <Text style={{ color: colors.text }}>{net}</Text>
+                    {ssid === net && (
+                      <Text style={{ color: colors.tint }}>✓</Text>
+                    )}
+                  </TouchableOpacity>
+                ))}
+
+              <TextInput
+                value={ssid}
+                onChangeText={setSsid}
+                style={[
+                  styles.input,
+                  { color: colors.text, borderColor: colors.tint, marginBottom: 12 },
+                ]}
+                placeholder="Wi‑Fi name (SSID)"
+                placeholderTextColor={colors.textSecondary}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
 
               <TextInput
                 value={password}

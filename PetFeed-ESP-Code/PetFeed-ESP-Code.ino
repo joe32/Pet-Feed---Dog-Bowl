@@ -343,6 +343,20 @@ void startWifiMode()
     factoryReset();
     ESP.restart(); });
 
+  // ================= GET LID STATE (APP) =================
+  server.on("/GETSTATE", HTTP_GET, []()
+            {
+  StaticJsonDocument<64> doc;
+  doc["state"] = lidIsOpen ? "OPEN" : "CLOSED";
+
+  String res;
+  serializeJson(doc, res);
+
+  server.send(200, "application/json", res);
+
+  Serial.print("📤 HTTP lid state sent: ");
+  Serial.println(doc["state"].as<String>()); });
+
   // ================= UPDATE WIFI (APP) =================
   server.on("/update-wifi", HTTP_POST, []()
             {
@@ -385,8 +399,26 @@ void startWifiMode()
     delay(800);
     ESP.restart(); });
 
+  // ================= GET SCHEDULE (APP) =================
+  server.on("/GETSCHEDULE", HTTP_POST, []()
+  {
+    if (!hasSchedule)
+    {
+      server.send(200, "text/plain", "SCHEDULE:NONE");
+      Serial.println("📤 GETSCHEDULE → NONE");
+      return;
+    }
+
+    char buf[32];
+    sprintf(buf, "SCHEDULED:%02d:%02d", scheduledHour, scheduledMinute);
+
+    server.send(200, "text/plain", buf);
+    Serial.print("📤 GETSCHEDULE → ");
+    Serial.println(buf);
+  });
+
   // ================= SCHEDULE HTTP ROUTES =================
-  server.on("/schedule", HTTP_POST, []()
+  server.on("/SCHEDULE", HTTP_POST, []()
             {
     if (!server.hasArg("plain")) {
       server.send(400, "text/plain", "no body");
@@ -407,15 +439,17 @@ void startWifiMode()
     scheduledMinute = time.substring(colon + 1).toInt();
     hasSchedule = true;
     scheduleExecutedToday = false;
+    moveLidClosed();  // ensure closed when scheduling
     saveSchedule();
     notifySchedule();
     confirmBeep();
     server.send(200, "application/json", "{\"status\":\"scheduled\"}"); });
 
-  server.on("/cancel-schedule", HTTP_POST, []()
+  server.on("/CANCEL_SCHEDULE", HTTP_POST, []()
             {
     hasSchedule = false;
     scheduledHour = -1;
+    moveLidClosed();  // ensure closed when scheduling
     scheduledMinute = -1;
     scheduleExecutedToday = false;
     saveSchedule();
@@ -452,54 +486,6 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks
     String cmd = String(c->getValue().c_str());
 
     cmd.trim();
-
-    // ================= STATE REQUEST (BLE) =================
-    if (cmd == "GETSTATE")
-    {
-      Serial.println("📲 BLE requested lid state");
-      notifyLidState();
-      return;
-    }
-
-    // ================= SCHEDULE SET (BLE) =================
-    if (cmd.startsWith("SCHEDULE:"))
-    {
-      String time = cmd.substring(9);
-      int colon = time.indexOf(":");
-      if (colon > 0)
-      {
-        scheduledHour = time.substring(0, colon).toInt();
-        scheduledMinute = time.substring(colon + 1).toInt();
-        hasSchedule = true;
-        scheduleExecutedToday = false;
-        saveSchedule();
-        notifySchedule();
-        confirmBeep();
-        Serial.println("⏰ Schedule set via BLE");
-      }
-      return;
-    }
-
-    // ================= SCHEDULE CANCEL (BLE) =================
-    if (cmd == "CANCEL_SCHEDULE")
-    {
-      hasSchedule = false;
-      scheduledHour = -1;
-      scheduledMinute = -1;
-      scheduleExecutedToday = false;
-      saveSchedule();
-      notifySchedule();
-      beep(900, 120);
-      Serial.println("🛑 Schedule cancelled via BLE");
-      return;
-    }
-
-    // ================= SCHEDULE QUERY (BLE) =================
-    if (cmd == "GETSCHEDULE")
-    {
-      notifySchedule();
-      return;
-    }
 
     // ================= WIFI SCAN (BLE) =================
     if (cmd == "WIFISCAN")
@@ -693,10 +679,7 @@ void loop()
         Serial.printf("⏰ Time: %02d:%02d:%02d\n", t.tm_hour, t.tm_min, t.tm_sec);
       }
 
-      if (hasSchedule &&
-          !scheduleExecutedToday &&
-          t.tm_hour == scheduledHour &&
-          t.tm_min == scheduledMinute)
+      if (hasSchedule && !scheduleExecutedToday && t.tm_hour == scheduledHour && t.tm_min == scheduledMinute)
       {
 
         Serial.println("🍽️ Executing scheduled feed");
