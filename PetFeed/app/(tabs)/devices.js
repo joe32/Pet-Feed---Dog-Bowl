@@ -24,6 +24,9 @@ import {
   startScan,
   stopScan,
   setBleScanMode,
+  connectToDevice,
+  sendWifiCredentials,
+  subscribeToNotifications,
 } from "../ble/bleManager";
 
 const STORAGE_KEY = "PETFEED_DEVICES";
@@ -54,6 +57,9 @@ export default function DevicesScreen() {
   const [otherDevices, setOtherDevices] = useState([]);
   const [scanning, setScanning] = useState(true);
   const [scanTimedOut, setScanTimedOut] = useState(false);
+  // Modal state for adding local device
+  const [addingLocalDevice, setAddingLocalDevice] = useState(null);
+  const [localDeviceName, setLocalDeviceName] = useState("");
 
   const loadDevices = useCallback(async () => {
     const saved = await AsyncStorage.getItem(STORAGE_KEY);
@@ -76,6 +82,7 @@ export default function DevicesScreen() {
     }
   }, []);
 
+
   useEffect(() => {
     loadDevices();
   }, [loadDevices]);
@@ -85,40 +92,6 @@ export default function DevicesScreen() {
       initBle();
     } catch {}
   }, []);
-
-  // 🔧 DEV ONLY — seed fake devices for Expo Go testing
-  
-  // useEffect(() => {
-  //   (async () => {
-  //     const fakeDevices = [
-  //       {
-  //         id: "dev-001",
-  //         name: "Kitchen Feeder",
-  //         host: "petfeeder-kitchen",
-  //         mode: "wifi",
-  //         online: true,
-  //       },
-  //       {
-  //         id: "dev-002",
-  //         name: "Garage Feeder",
-  //         host: "petfeeder-garage",
-  //         mode: "wifi",
-  //         online: false,
-  //       },
-  //       {
-  //         id: "dev-003",
-  //         name: "Holiday Feeder",
-  //         host: "petfeeder-holiday",
-  //         mode: "wifi",
-  //         online: true,
-  //       },
-  //     ];
-
-  //     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(fakeDevices));
-  //     await AsyncStorage.setItem(ACTIVE_DEVICE_KEY, "dev-001");
-  //     await loadDevices();
-  //   })();
-  // }, []);
 
   // 🔁 Re-sync active device when returning to this screen
   useFocusEffect(
@@ -131,7 +104,6 @@ export default function DevicesScreen() {
       })();
     }, [])
   );
-
 
   useFocusEffect(
     useCallback(() => {
@@ -151,7 +123,7 @@ export default function DevicesScreen() {
               ...prev,
               {
                 id: device.id,
-                name: device.name || "PetFeed device",
+                name: device.name || "PetFeeder",
               },
             ];
           });
@@ -208,6 +180,13 @@ export default function DevicesScreen() {
   }
 
   async function removeDevice(device) {
+    // Prevent factory reset for local devices
+    if (device.mode === "local") {
+      const updated = devices.filter((d) => d.id !== device.id);
+      setDevices(updated);
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      return;
+    }
     // If device is OFFLINE, warn user and allow force delete
     if (!device.online) {
       Alert.alert(
@@ -282,51 +261,59 @@ export default function DevicesScreen() {
           );
         },
       },
-      {
-        text: "Edit Wi‑Fi",
-        onPress: () => {
-          if (!device.online) {
-            Alert.alert(
-              "Device offline",
-              "Wi‑Fi settings can only be changed while the device is online."
-            );
-            return;
-          }
+      // Only render Edit Wi‑Fi for non-local devices
+      ...(device.mode !== "local"
+        ? [
+            {
+              text: "Edit Wi‑Fi",
+              onPress: () => {
+                if (!device.online) {
+                  Alert.alert(
+                    "Device offline",
+                    "Wi‑Fi settings can only be changed while the device is online."
+                  );
+                  return;
+                }
 
-          Alert.prompt(
-            "Wi‑Fi SSID",
-            "Enter the new Wi‑Fi network name",
-            (ssid) => {
-              if (!ssid) return;
+                Alert.prompt(
+                  "Wi‑Fi SSID",
+                  "Enter the new Wi‑Fi network name",
+                  (ssid) => {
+                    if (!ssid) return;
 
-              Alert.prompt(
-                "Wi‑Fi Password",
-                "Enter the Wi‑Fi password",
-                async (password) => {
-                  try {
-                    await fetch(`http://${device.host}.local/update-wifi`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ ssid, password }),
-                    });
+                    Alert.prompt(
+                      "Wi‑Fi Password",
+                      "Enter the Wi‑Fi password",
+                      async (password) => {
+                        try {
+                          await fetch(
+                            `http://${device.host}.local/update-wifi`,
+                            {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ ssid, password }),
+                            }
+                          );
 
-                    Alert.alert(
-                      "Updating Wi‑Fi",
-                      "Saved. The device will reboot and attempt to connect to the new Wi‑Fi network."
-                    );
-                  } catch {
-                    Alert.alert(
-                      "Failed",
-                      "Could not send Wi‑Fi details to the device."
+                          Alert.alert(
+                            "Updating Wi‑Fi",
+                            "Saved. The device will reboot and attempt to connect to the new Wi‑Fi network."
+                          );
+                        } catch {
+                          Alert.alert(
+                            "Failed",
+                            "Could not send Wi‑Fi details to the device."
+                          );
+                        }
+                      },
+                      "secure-text"
                     );
                   }
-                },
-                "secure-text"
-              );
-            }
-          );
-        },
-      },
+                );
+              },
+            },
+          ]
+        : []),
       {
         text: "Device Details",
         onPress: () => {
@@ -335,7 +322,7 @@ export default function DevicesScreen() {
             `Name: ${device.name}
 ID: ${device.id}
 Hostname (mDNS): ${device.host}.local
-Connection: Wi‑Fi (local)
+Connection: ${device.mode === "local" ? "Local device" : "Wi‑Fi (local)"}
 Mode: ${device.mode}
 Status: ${device.online ? "Online" : "Offline"}
 IP Address: Unknown`,
@@ -394,7 +381,8 @@ IP Address: Unknown`,
                   marginTop: 2,
                 }}
               >
-                Connection: Wi‑Fi (local)
+                Connection:{" "}
+                {device.mode === "local" ? "Local device" : "Wi‑Fi (local)"}
               </Text>
             </View>
 
@@ -426,52 +414,88 @@ IP Address: Unknown`,
     );
   }
 
-function retryDiscovery() {
-  setOtherDevices([]);
-  setScanTimedOut(false);
-  setScanning(true);
+  function retryDiscovery() {
+    setOtherDevices([]);
+    setScanTimedOut(false);
+    setScanning(true);
 
-  setBleScanMode("claim");
-  stopScan();
-
-  startScan(
-    (device) => {
-      setOtherDevices((prev) => {
-        if (prev.find((d) => d.id === device.id)) return prev;
-        return [
-          ...prev,
-          {
-            id: device.id,
-            name: device.name || "PetFeed device",
-          },
-        ];
-      });
-    },
-    () => {}
-  );
-
-  setTimeout(() => {
+    setBleScanMode("claim");
     stopScan();
-    setScanning(false);
-    setScanTimedOut(true);
-  }, 10000);
-}
+
+    startScan(
+      (device) => {
+        setOtherDevices((prev) => {
+          if (prev.find((d) => d.id === device.id)) return prev;
+          return [
+            ...prev,
+            {
+              id: device.id,
+              name: device.name || "PetFeeder",
+            },
+          ];
+        });
+      },
+      () => {}
+    );
+
+    setTimeout(() => {
+      stopScan();
+      setScanning(false);
+      setScanTimedOut(true);
+    }, 10000);
+  }
 
   function renderOtherDevice(device) {
     return (
-      <View key={device.id} style={[styles.card, { backgroundColor: colors.card, opacity: 0.9 }]}>
+      <View
+        key={device.id}
+        style={[styles.card, { backgroundColor: colors.card, opacity: 0.9 }]}
+      >
         <View style={[styles.statusDot, { backgroundColor: "#34C759" }]} />
         <View style={{ flex: 1 }}>
           <Text style={[styles.deviceName, { color: colors.text }]}>
             {device.name}
           </Text>
-          <Text style={{ color: colors.textSecondary, fontSize: 14 }}>
-            Other device on your network
+          <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+            {device.id}
           </Text>
         </View>
         <TouchableOpacity
-          onPress={() => {
-            router.push("/(device-setup)/add-device");
+          onPress={async () => {
+            try {
+              setBleScanMode("claim");
+              await connectToDevice(device.id);
+
+              // Ask ESP for its hostname via CLAIM
+              let resolvedHost = null;
+
+              const unsub = subscribeToNotifications((msg) => {
+                if (typeof msg === "string" && msg.startsWith("HOST:")) {
+                  resolvedHost = msg.replace("HOST:", "").trim();
+                }
+              });
+
+              await sendWifiCredentials("CLAIM");
+
+              // wait briefly for notification
+              await new Promise((r) => setTimeout(r, 500));
+              unsub();
+
+              if (!resolvedHost) {
+                throw new Error("No hostname returned from device");
+              }
+
+              setAddingLocalDevice({
+                ...device,
+                host: resolvedHost,
+              });
+              setLocalDeviceName(device.name);
+            } catch (e) {
+              Alert.alert(
+                "Connection failed",
+                "Could not claim this device. Make sure it is powered on and nearby."
+              );
+            }
           }}
         >
           <Text style={{ color: colors.tint, fontWeight: "600" }}>Add</Text>
@@ -511,17 +535,23 @@ function retryDiscovery() {
               </Text>
             </View>
           ) : (
-            <>
-              {devices.map(renderDevice)}
-            </>
+            <>{devices.map(renderDevice)}</>
           )}
           <View style={{ marginTop: 32 }}>
-            <Text style={[styles.sectionTitle, { color: colors.textSecondary }]}>
+            <Text
+              style={[styles.sectionTitle, { color: colors.textSecondary }]}
+            >
               Other devices on your network
             </Text>
 
             {scanning && (
-              <View style={{ flexDirection: "row", alignItems: "center", marginBottom: 12 }}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  marginBottom: 12,
+                }}
+              >
                 <ActivityIndicator
                   size="small"
                   color={colors.textSecondary}
@@ -550,6 +580,70 @@ function retryDiscovery() {
           </View>
         </ScrollView>
       </SafeAreaView>
+      {addingLocalDevice && (
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modal, { backgroundColor: colors.background }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>
+              Add local device
+            </Text>
+
+            <Text style={{ color: colors.textSecondary, marginBottom: 12 }}>
+              This device will be added as a local device on your network.
+            </Text>
+
+            <TextInput
+              value={localDeviceName}
+              onChangeText={setLocalDeviceName}
+              style={[
+                styles.input,
+                { color: colors.text, borderColor: colors.tint },
+              ]}
+            />
+
+            <TouchableOpacity
+              style={[styles.modalButton, { backgroundColor: colors.tint }]}
+              onPress={async () => {
+                const saved = await AsyncStorage.getItem(STORAGE_KEY);
+                const parsed = saved ? JSON.parse(saved) : [];
+
+                const newDevice = {
+                  id: addingLocalDevice.id,
+                  name: localDeviceName,
+                  host: addingLocalDevice.host,
+                  hostname: `${addingLocalDevice.host}.local`,
+                  mode: "local",
+                  online: true,
+                };
+
+                const updated = [...parsed, newDevice];
+                await AsyncStorage.setItem(
+                  STORAGE_KEY,
+                  JSON.stringify(updated)
+                );
+                setDevices(updated);
+
+                setAddingLocalDevice(null);
+                setLocalDeviceName("");
+              }}
+            >
+              <Text style={{ color: colors.background, fontWeight: "600" }}>
+                Save
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => setAddingLocalDevice(null)}
+              style={{ marginTop: 12 }}
+            >
+              <Text
+                style={{ color: colors.textSecondary, textAlign: "center" }}
+              >
+                Cancel
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
     </GestureHandlerRootView>
   );
 }
@@ -604,5 +698,44 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     textTransform: "uppercase",
     letterSpacing: 0.5,
+  },
+  // Modal styles for local device add
+  modalOverlay: {
+    position: "absolute",
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: "rgba(0,0,0,0.3)",
+    justifyContent: "center",
+    alignItems: "center",
+    zIndex: 100,
+  },
+  modal: {
+    width: "85%",
+    borderRadius: 16,
+    padding: 24,
+    shadowColor: "#000",
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 4,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: "700",
+    marginBottom: 12,
+    textAlign: "center",
+  },
+  input: {
+    borderWidth: 1.5,
+    borderRadius: 10,
+    padding: 12,
+    fontSize: 17,
+    marginBottom: 16,
+  },
+  modalButton: {
+    borderRadius: 10,
+    paddingVertical: 12,
+    alignItems: "center",
   },
 });

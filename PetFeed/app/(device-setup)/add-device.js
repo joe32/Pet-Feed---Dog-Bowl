@@ -148,6 +148,7 @@ async function scanWifiNetworks() {
   }, []);
 
   async function beginScan() {
+    setBleScanMode("default");
     if (scanning) return;
 
     // Ensure any previous scan is fully stopped
