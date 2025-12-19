@@ -64,15 +64,15 @@ export default function AddDeviceScreen() {
 
   // test to show popup on expo.
 
-  useEffect(() => {
-    setSetupStep("wifi");
-    setGeneratedHost("test-host");
-  }, []);
-  useEffect(() => {
-    if (wifiTimedOut) {
-      setLoadingWifi(false);
-    }
-  }, [wifiTimedOut]);
+  // useEffect(() => {
+  //   setSetupStep("wifi");
+  //   setGeneratedHost("test-host");
+  // }, []);
+  // useEffect(() => {
+  //   if (wifiTimedOut) {
+  //     setLoadingWifi(false);
+  //   }
+  // }, [wifiTimedOut]);
 
   // (REMOVED: auto-start Wi-Fi scan when modal appears)
 

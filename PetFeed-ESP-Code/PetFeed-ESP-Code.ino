@@ -318,6 +318,11 @@ void startWifiMode() {
   BLEAdvertising *adv = BLEDevice::getAdvertising();
   adv->stop();
   adv->addServiceUUID(CLAIM_SERVICE_UUID);
+
+  // Slow BLE advertising to coexist with Wi‑Fi
+  adv->setMinInterval(0x200); // ~320ms
+  adv->setMaxInterval(0x400); // ~640ms
+
   adv->start();
 
   Serial.println("🔵 CLAIM BLE advertising started (Wi‑Fi mode)");
@@ -817,7 +822,7 @@ void loop() {
     ArduinoOTA.handle();
   }
 
-  if (deviceMode == "wifi" && millis() - lastDiscoveryBroadcast > 3000) {
+  if (deviceMode == "wifi" && millis() - lastDiscoveryBroadcast > 6000) {
     lastDiscoveryBroadcast = millis();
 
     String host = mdnsHost.length() ? mdnsHost : "petfeeder";
@@ -828,5 +833,5 @@ void loop() {
     discoveryUdp.endPacket();
   }
 
-  delay(50);
+  delay(5);
 }
