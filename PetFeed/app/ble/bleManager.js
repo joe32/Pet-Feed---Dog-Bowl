@@ -155,6 +155,39 @@ export async function sendWifiCredentials(ssid, password) {
   );
 }
 
+export async function sendClaimCommand() {
+  if (!connectedDevice) {
+    throw new Error("No device connected");
+  }
+
+  // Force claim mode UUIDs regardless of current scan mode
+  const serviceUuid = CLAIM_SERVICE_UUID;
+  const charUuid = CLAIM_CHARACTERISTIC_UUID;
+
+  // Write "CLAIM" to ESP
+  const base64Payload = Buffer.from("CLAIM", "utf8").toString("base64");
+
+  const characteristic =
+    await connectedDevice.writeCharacteristicWithResponseForService(
+      serviceUuid,
+      charUuid,
+      base64Payload
+    );
+
+  // Read back the notified / updated value (HOST:<hostname>)
+  const readChar =
+    await connectedDevice.readCharacteristicForService(
+      serviceUuid,
+      charUuid
+    );
+
+  const decoded = Buffer.from(readChar.value, "base64")
+    .toString("utf8")
+    .trim();
+
+  return decoded; // expected format: "HOST:petfeeder-12345"
+}
+
 /* -------------------- CLEANUP -------------------- */
 
 export function destroyBleManager() {

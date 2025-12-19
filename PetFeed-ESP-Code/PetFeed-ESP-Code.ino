@@ -31,6 +31,8 @@
 #define CLAIM_CHARACTERISTIC_UUID "9b3a9f10-2c2e-4b6f-9f6a-9b4f5e7c2222"
 
 BLECharacteristic *pClaimCharacteristic = nullptr;
+BLEServer *pClaimServer = nullptr;
+BLEService *pClaimService = nullptr;
 
 BLEServer *pServer = nullptr;
 BLECharacteristic *pCharacteristic = nullptr;
@@ -64,33 +66,28 @@ int scheduledHour = -1;
 int scheduledMinute = -1;
 bool scheduleExecutedToday = false;
 
-void setUKTimezone()
-{
+void setUKTimezone() {
   setenv("TZ", "GMT0BST,M3.5.0/1,M10.5.0/2", 1);
   tzset();
 }
 
-void performWifiScan(bool verboseSerial)
-{
+void performWifiScan(bool verboseSerial) {
   Serial.println("📡 Starting Wi‑Fi scan");
   int n = WiFi.scanNetworks(/*async=*/false, /*hidden=*/true);
   lastWifiScanResult = "";
 
-  if (n <= 0)
-  {
+  if (n <= 0) {
     Serial.println("⚠️ No Wi‑Fi networks found");
     return;
   }
 
-  for (int i = 0; i < n; i++)
-  {
+  for (int i = 0; i < n; i++) {
     lastWifiScanResult += WiFi.SSID(i);
     if (i < n - 1)
       lastWifiScanResult += ",";
   }
 
-  if (verboseSerial)
-  {
+  if (verboseSerial) {
     Serial.print("📶 Networks found: ");
     Serial.println(lastWifiScanResult);
   }
@@ -98,7 +95,7 @@ void performWifiScan(bool verboseSerial)
 
 // ================= SERVO =================
 Servo myServo;
-const int servoPin = 6; // KEEP GPIO 6
+const int servoPin = 6;  // KEEP GPIO 6
 const int LID_OPEN = 0;
 const int LID_CLOSED = 120;
 
@@ -110,40 +107,33 @@ const int buzzerPin = 5;
 const int buzzerChannel = 7;
 const int buzzerResolution = 8;
 
-void toneOn(int freq)
-{
+void toneOn(int freq) {
   ledcWriteTone(buzzerChannel, freq);
 }
 
-void toneOff()
-{
+void toneOff() {
   ledcWriteTone(buzzerChannel, 0);
 }
 
-void beep(int freq, int durationMs)
-{
+void beep(int freq, int durationMs) {
   toneOn(freq);
   delay(durationMs);
   toneOff();
 }
 
-void clickBeep()
-{
+void clickBeep() {
   beep(1800, 40);
 }
 
-void confirmBeep()
-{
+void confirmBeep() {
   beep(1200, 120);
   delay(80);
   beep(1600, 160);
 }
 
-void scheduledFeedBeep()
-{
+void scheduledFeedBeep() {
   // Long repeating tone to alert a scheduled feed
-  for (int i = 0; i < 6; i++)
-  {
+  for (int i = 0; i < 6; i++) {
     toneOn(1400);
     delay(350);
     toneOff();
@@ -152,8 +142,7 @@ void scheduledFeedBeep()
 }
 
 // ================= HELPER: NOTIFY LID STATE =================
-void notifyLidState()
-{
+void notifyLidState() {
   if (!pCharacteristic)
     return;
 
@@ -166,8 +155,7 @@ void notifyLidState()
 }
 
 // ================= HELPER: SAVE/LOAD SCHEDULE =================
-void saveSchedule()
-{
+void saveSchedule() {
   prefs.begin("petfeed", false);
   prefs.putBool("hasSchedule", hasSchedule);
   prefs.putInt("schHour", scheduledHour);
@@ -175,8 +163,7 @@ void saveSchedule()
   prefs.end();
 }
 
-void loadSchedule()
-{
+void loadSchedule() {
   prefs.begin("petfeed", true);
   hasSchedule = prefs.getBool("hasSchedule", false);
   scheduledHour = prefs.getInt("schHour", -1);
@@ -185,14 +172,12 @@ void loadSchedule()
 }
 
 // ================= HELPER: NOTIFY SCHEDULE =================
-void notifySchedule()
-{
+void notifySchedule() {
   // NOTE: BLE notification only; app now relies on HTTP GETSCHEDULE
   if (!pCharacteristic)
     return;
 
-  if (!hasSchedule)
-  {
+  if (!hasSchedule) {
     pCharacteristic->setValue("SCHEDULE:NONE");
     pCharacteristic->notify();
     Serial.println("📤 Sent schedule: NONE");
@@ -209,23 +194,17 @@ void notifySchedule()
 }
 
 // ================= SERVO MOTION =================
-void servoWriteSmooth(int targetAngle)
-{
+void servoWriteSmooth(int targetAngle) {
   if (targetAngle == currentAngle)
     return;
 
-  if (targetAngle < currentAngle)
-  {
-    for (int i = currentAngle; i >= targetAngle; i--)
-    {
+  if (targetAngle < currentAngle) {
+    for (int i = currentAngle; i >= targetAngle; i--) {
       myServo.write(i);
       delay(5);
     }
-  }
-  else
-  {
-    for (int i = currentAngle; i <= targetAngle; i++)
-    {
+  } else {
+    for (int i = currentAngle; i <= targetAngle; i++) {
       myServo.write(i);
       delay(5);
     }
@@ -233,8 +212,7 @@ void servoWriteSmooth(int targetAngle)
   currentAngle = targetAngle;
 }
 
-void moveLidOpen()
-{
+void moveLidOpen() {
   if (lidIsOpen)
     return;
   Serial.println("🔓 OPEN");
@@ -247,8 +225,7 @@ void moveLidOpen()
   notifyLidState();
 }
 
-void moveLidClosed()
-{
+void moveLidClosed() {
   if (!lidIsOpen)
     return;
   Serial.println("🔒 CLOSE");
@@ -262,8 +239,7 @@ void moveLidClosed()
 }
 
 // ================= FACTORY RESET =================
-void factoryReset()
-{
+void factoryReset() {
   Serial.println("🧨 FACTORY RESET");
 
   prefs.begin("petfeed", false);
@@ -286,15 +262,16 @@ void factoryReset()
 // ================= WIFI MODE =================
 
 // ===== CLAIM BLE CALLBACK =====
-class ClaimCharacteristicCallbacks : public BLECharacteristicCallbacks
-{
-  void onWrite(BLECharacteristic *c) override
-  {
+class ClaimCharacteristicCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *c) override {
     String cmd = String(c->getValue().c_str());
     cmd.trim();
 
-    if (cmd == "CLAIM")
-    {
+    Serial.print("📥 CLAIM write received: '");
+    Serial.print(cmd);
+    Serial.println("'");
+
+    if (cmd == "CLAIM") {
       String host = mdnsHost.length() ? mdnsHost : "petfeeder";
       String reply = "HOST:" + host;
 
@@ -306,51 +283,56 @@ class ClaimCharacteristicCallbacks : public BLECharacteristicCallbacks
     }
   }
 };
-void startWifiMode()
-{
+
+class ClaimServerCallbacks : public BLEServerCallbacks {
+  void onConnect(BLEServer *) override {
+    Serial.println("📱 CLAIM BLE connected");
+  }
+
+  void onDisconnect(BLEServer *) override {
+    Serial.println("📴 CLAIM BLE disconnected — restarting advertising");
+    BLEDevice::startAdvertising();
+  }
+};
+void startWifiMode() {
   Serial.println("📡 Wi-Fi mode");
 
-  // Ensure BLE stack is initialised before creating claim server
+  Serial.println("🔧 Initialising CLAIM BLE service");
+
   BLEDevice::init("PetFeeder");
 
+  pClaimServer = BLEDevice::createServer();
+  pClaimServer->setCallbacks(new ClaimServerCallbacks());
 
-  // ===== CLAIM BLE SERVICE (for "Other devices on network") =====
-  BLEServer *claimServer = BLEDevice::createServer();
+  pClaimService = pClaimServer->createService(CLAIM_SERVICE_UUID);
 
-  BLEService *claimService = claimServer->createService(CLAIM_SERVICE_UUID);
-
-  pClaimCharacteristic = claimService->createCharacteristic(
-      CLAIM_CHARACTERISTIC_UUID,
-      BLECharacteristic::PROPERTY_READ |
-      BLECharacteristic::PROPERTY_WRITE |
-      BLECharacteristic::PROPERTY_NOTIFY
-  );
+  pClaimCharacteristic = pClaimService->createCharacteristic(
+    CLAIM_CHARACTERISTIC_UUID,
+    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY);
 
   pClaimCharacteristic->addDescriptor(new BLE2902());
-
   pClaimCharacteristic->setCallbacks(new ClaimCharacteristicCallbacks());
 
-  claimService->start();
+  pClaimService->start();
 
   BLEAdvertising *adv = BLEDevice::getAdvertising();
+  adv->stop();
   adv->addServiceUUID(CLAIM_SERVICE_UUID);
   adv->start();
 
-  Serial.println("🔵 CLAIM BLE service advertised (Wi‑Fi mode)");
+  Serial.println("🔵 CLAIM BLE advertising started (Wi‑Fi mode)");
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(wifiSSID.c_str(), wifiPASS.c_str());
 
   unsigned long start = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - start < 15000)
-  {
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
     delay(500);
     Serial.print(".");
   }
   Serial.println();
 
-  if (WiFi.status() != WL_CONNECTED)
-  {
+  if (WiFi.status() != WL_CONNECTED) {
     Serial.println("❌ Wi-Fi failed");
     factoryReset();
     ESP.restart();
@@ -365,19 +347,15 @@ void startWifiMode()
   delay(1500);
   setUKTimezone();
 
-  if (mdnsHost.length())
-  {
+  if (mdnsHost.length()) {
     Serial.print("🔧 Starting mDNS with hostname: ");
     Serial.println(mdnsHost);
 
-    if (MDNS.begin(mdnsHost.c_str()))
-    {
+    if (MDNS.begin(mdnsHost.c_str())) {
       Serial.print("🌐 mDNS started successfully: ");
       Serial.print(mdnsHost);
       Serial.println(".local");
-    }
-    else
-    {
+    } else {
       Serial.println("❌ mDNS failed to start");
     }
   }
@@ -391,34 +369,34 @@ void startWifiMode()
   ArduinoOTA.setMdnsEnabled(true);
 
   // Keep OTA hostname aligned with the app's hostname when provided
-  if (mdnsHost.length())
-  {
+  if (mdnsHost.length()) {
     ArduinoOTA.setHostname(mdnsHost.c_str());
-  }
-  else
-  {
+  } else {
     ArduinoOTA.setHostname("petfeeder");
   }
   ArduinoOTA.setPassword("ota");
 
-  ArduinoOTA.onStart([]()
-                     { Serial.println("🔁 OTA update start"); });
+  ArduinoOTA.onStart([]() {
+    Serial.println("🔁 OTA update start");
+  });
 
-  ArduinoOTA.onEnd([]()
-                   { Serial.println("✅ OTA update complete"); });
+  ArduinoOTA.onEnd([]() {
+    Serial.println("✅ OTA update complete");
+  });
 
-  ArduinoOTA.onError([](ota_error_t error)
-                     { Serial.printf("❌ OTA error[%u]\n", error); });
+  ArduinoOTA.onError([](ota_error_t error) {
+    Serial.printf("❌ OTA error[%u]\n", error);
+  });
 
   ArduinoOTA.begin();
   Serial.println("📡 OTA ready");
 
-  server.on("/ping", []()
-            { server.send(200, "application/json", "{\"type\":\"petfeed\"}"); });
+  server.on("/ping", []() {
+    server.send(200, "application/json", "{\"type\":\"petfeed\"}");
+  });
 
   // ================= WIFI SCAN (APP) =================
-  server.on("/WIFISCAN", HTTP_GET, []()
-  {
+  server.on("/WIFISCAN", HTTP_GET, []() {
     Serial.println("📥 HTTP /WIFISCAN called");
 
     performWifiScan(false);
@@ -426,14 +404,11 @@ void startWifiMode()
     StaticJsonDocument<512> doc;
     JsonArray arr = doc.createNestedArray("networks");
 
-    if (lastWifiScanResult.length())
-    {
+    if (lastWifiScanResult.length()) {
       int start = 0;
-      while (true)
-      {
+      while (true) {
         int idx = lastWifiScanResult.indexOf(",", start);
-        if (idx == -1)
-        {
+        if (idx == -1) {
           arr.add(lastWifiScanResult.substring(start));
           break;
         }
@@ -447,8 +422,7 @@ void startWifiMode()
     server.send(200, "application/json", res);
   });
 
-  server.on("/command", HTTP_POST, []()
-            {
+  server.on("/command", HTTP_POST, []() {
     if (!server.hasArg("plain")) {
       server.send(400, "text/plain", "no body");
       return;
@@ -462,32 +436,28 @@ void startWifiMode()
     if (cmd == "OPEN") moveLidOpen();
     if (cmd == "CLOSE") moveLidClosed();
 
-    server.send(200, "application/json", "{\"status\":\"ok\"}"); });
+    server.send(200, "application/json", "{\"status\":\"ok\"}");
+  });
 
-  server.on("/factory-reset", HTTP_POST, []()
-            {
+  server.on("/factory-reset", HTTP_POST, []() {
     server.send(200, "text/plain", "resetting");
     delay(200);
     factoryReset();
-    ESP.restart(); });
+    ESP.restart();
+  });
 
   // ================= GET LID STATE (APP) =================
-  server.on("/GETSTATE", HTTP_GET, []()
-            {
-  StaticJsonDocument<64> doc;
-  doc["state"] = lidIsOpen ? "OPEN" : "CLOSED";
+  server.on("/GETSTATE", HTTP_GET, []() {
+    StaticJsonDocument<64> doc;
+    doc["state"] = lidIsOpen ? "OPEN" : "CLOSED";
 
-  String res;
-  serializeJson(doc, res);
-
-  server.send(200, "application/json", res);
-
-  Serial.print("📤 HTTP lid state sent: ");
-  Serial.println(doc["state"].as<String>()); });
+    String res;
+    serializeJson(doc, res);
+    server.send(200, "application/json", res);
+  });
 
   // ================= UPDATE WIFI (APP) =================
-  server.on("/update-wifi", HTTP_POST, []()
-            {
+  server.on("/update-wifi", HTTP_POST, []() {
     if (!server.hasArg("plain")) {
       server.send(400, "text/plain", "no body");
       return;
@@ -525,20 +495,19 @@ void startWifiMode()
     Serial.println("🔁 Rebooting to apply new Wi‑Fi...");
     Serial.flush();
     delay(800);
-    ESP.restart(); });
+    ESP.restart();
+  });
 
   // ================= GET SCHEDULE (APP) =================
-  server.on("/GETSCHEDULE", HTTP_GET, []()
-  {
+  server.on("/GETSCHEDULE", HTTP_GET, []() {
     StaticJsonDocument<128> doc;
 
-    if (!hasSchedule)
-    {
+    if (!hasSchedule) {
       doc["hasSchedule"] = false;
       String res;
       serializeJson(doc, res);
       server.send(200, "application/json", res);
-      Serial.println("📤 GETSCHEDULE → NONE");
+      // Serial.println("📤 GETSCHEDULE → NONE");
       return;
     }
 
@@ -550,15 +519,14 @@ void startWifiMode()
     serializeJson(doc, res);
     server.send(200, "application/json", res);
 
-    Serial.print("📤 GETSCHEDULE → ");
-    Serial.print(scheduledHour);
-    Serial.print(":");
-    Serial.println(scheduledMinute);
+    // Serial.print("📤 GETSCHEDULE → ");
+    // Serial.print(scheduledHour);
+    // Serial.print(":");
+    // Serial.println(scheduledMinute);
   });
 
   // ================= SCHEDULE HTTP ROUTES =================
-  server.on("/SCHEDULE", HTTP_POST, []()
-            {
+  server.on("/SCHEDULE", HTTP_POST, []() {
     Serial.println("📥 HTTP /SCHEDULE called");
     if (!server.hasArg("plain")) {
       server.send(400, "text/plain", "no body");
@@ -586,10 +554,10 @@ void startWifiMode()
     notifySchedule();
     confirmBeep();
     Serial.println("✅ Schedule saved successfully");
-    server.send(200, "application/json", "{\"status\":\"scheduled\"}"); });
+    server.send(200, "application/json", "{\"status\":\"scheduled\"}");
+  });
 
-  server.on("/CANCEL_SCHEDULE", HTTP_POST, []()
-            {
+  server.on("/CANCEL_SCHEDULE", HTTP_POST, []() {
     Serial.println("📥 HTTP /CANCEL_SCHEDULE called");
     hasSchedule = false;
     scheduledHour = -1;
@@ -599,31 +567,27 @@ void startWifiMode()
     notifySchedule();
     beep(900, 120);
     Serial.println("🗑️ Schedule cancelled");
-    server.send(200, "application/json", "{\"status\":\"cancelled\"}"); });
+    server.send(200, "application/json", "{\"status\":\"cancelled\"}");
+  });
 
   server.begin();
 }
 
 // ================= BLE CALLBACKS =================
-class ServerCallbacks : public BLEServerCallbacks
-{
-  void onConnect(BLEServer *) override
-  {
+class ServerCallbacks : public BLEServerCallbacks {
+  void onConnect(BLEServer *) override {
     deviceConnected = true;
     Serial.println("📱 BLE connected");
   }
-  void onDisconnect(BLEServer *) override
-  {
+  void onDisconnect(BLEServer *) override {
     deviceConnected = false;
     Serial.println("📴 BLE disconnected");
     BLEDevice::startAdvertising();
   }
 };
 
-class CharacteristicCallbacks : public BLECharacteristicCallbacks
-{
-  void onWrite(BLECharacteristic *c) override
-  {
+class CharacteristicCallbacks : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic *c) override {
     Serial.print("📨 BLE raw payload: ");
     Serial.println(c->getValue().c_str());
 
@@ -632,13 +596,11 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks
     cmd.trim();
 
     // ================= WIFI SCAN (BLE) =================
-    if (cmd == "WIFISCAN")
-    {
+    if (cmd == "WIFISCAN") {
       Serial.println("📡 BLE requested Wi‑Fi scan");
 
       int n = WiFi.scanNetworks();
-      if (n <= 0)
-      {
+      if (n <= 0) {
         c->setValue("WIFISCAN:EMPTY");
         c->notify();
         Serial.println("⚠️ No networks found");
@@ -646,8 +608,7 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks
       }
 
       String result = "WIFISCAN:";
-      for (int i = 0; i < n; i++)
-      {
+      for (int i = 0; i < n; i++) {
         result += WiFi.SSID(i);
         if (i < n - 1)
           result += ",";
@@ -661,8 +622,7 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks
       return;
     }
 
-    if (!cmd.startsWith("WIFI:"))
-    {
+    if (!cmd.startsWith("WIFI:")) {
       return;
     }
 
@@ -674,24 +634,21 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks
     int p1 = cmd.indexOf("pass=");
     int h1 = cmd.indexOf("host=");
 
-    if (s1 >= 0)
-    {
+    if (s1 >= 0) {
       int end = cmd.indexOf(";", s1);
       if (end < 0)
         end = cmd.length();
       wifiSSID = cmd.substring(s1 + 5, end);
     }
 
-    if (p1 >= 0)
-    {
+    if (p1 >= 0) {
       int end = cmd.indexOf(";", p1);
       if (end < 0)
         end = cmd.length();
       wifiPASS = cmd.substring(p1 + 5, end);
     }
 
-    if (h1 >= 0)
-    {
+    if (h1 >= 0) {
       int end = cmd.indexOf(";", h1);
       if (end < 0)
         end = cmd.length();
@@ -699,8 +656,7 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks
     }
 
     // HARD GUARD: if SSID accidentally contains "WIFI:ssid=", strip it
-    if (wifiSSID.startsWith("WIFI:ssid="))
-    {
+    if (wifiSSID.startsWith("WIFI:ssid=")) {
       wifiSSID.replace("WIFI:ssid=", "");
     }
 
@@ -712,8 +668,7 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks
     Serial.print("HOST: ");
     Serial.println(mdnsHost);
 
-    if (!wifiSSID.length() || !wifiPASS.length())
-    {
+    if (!wifiSSID.length() || !wifiPASS.length()) {
       Serial.println("❌ Invalid Wi‑Fi credentials received, aborting");
       return;
     }
@@ -737,8 +692,7 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks
 };
 
 // ================= SETUP =================
-void setup()
-{
+void setup() {
   Serial.begin(115200);
   delay(1000);
 
@@ -766,8 +720,7 @@ void setup()
 
   loadSchedule();
 
-  if (deviceMode == "wifi" && wifiSSID.length())
-  {
+  if (deviceMode == "wifi" && wifiSSID.length()) {
     startWifiMode();
     return;
   }
@@ -778,8 +731,8 @@ void setup()
 
   BLEService *service = pServer->createService(SERVICE_UUID);
   pCharacteristic = service->createCharacteristic(
-      CHARACTERISTIC_UUID,
-      BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY);
+    CHARACTERISTIC_UUID,
+    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY);
   pCharacteristic->addDescriptor(new BLE2902());
   pCharacteristic->setCallbacks(new CharacteristicCallbacks());
   pCharacteristic->setValue("READY");
@@ -792,10 +745,8 @@ void setup()
 }
 
 // ================= LOOP =================
-void loop()
-{
-  if (Serial.available())
-  {
+void loop() {
+  if (Serial.available()) {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim();
 
@@ -803,17 +754,14 @@ void loop()
       moveLidOpen();
     if (cmd == "close")
       moveLidClosed();
-    if (cmd == "factory")
-    {
+    if (cmd == "factory") {
       factoryReset();
       ESP.restart();
     }
-    if (cmd == "network")
-    {
+    if (cmd == "network") {
       Serial.println("🧪 Serial Wi‑Fi scan (5s test)");
       unsigned long start = millis();
-      while (millis() - start < 5000)
-      {
+      while (millis() - start < 5000) {
         performWifiScan(true);
         delay(1000);
       }
@@ -821,20 +769,16 @@ void loop()
   }
 
   // Print time once per minute, exactly at :00 seconds (non-blocking)
-  if (deviceMode == "wifi")
-  {
+  if (deviceMode == "wifi") {
     struct tm t;
-    if (getLocalTime(&t))
-    {
-      if (t.tm_sec == 0 && (t.tm_min != lastPrintedMinute || t.tm_hour != lastPrintedHour))
-      {
+    if (getLocalTime(&t)) {
+      if (t.tm_sec == 0 && (t.tm_min != lastPrintedMinute || t.tm_hour != lastPrintedHour)) {
         lastPrintedMinute = t.tm_min;
         lastPrintedHour = t.tm_hour;
         Serial.printf("⏰ Time: %02d:%02d:%02d\n", t.tm_hour, t.tm_min, t.tm_sec);
       }
 
-      if (hasSchedule && !scheduleExecutedToday && t.tm_hour == scheduledHour && t.tm_min == scheduledMinute)
-      {
+      if (hasSchedule && !scheduleExecutedToday && t.tm_hour == scheduledHour && t.tm_min == scheduledMinute) {
         Serial.println("🍽️ Executing scheduled feed");
         scheduledFeedBeep();
         moveLidOpen();
@@ -851,20 +795,25 @@ void loop()
       }
 
       // Reset daily execution flag at midnight
-      if (t.tm_hour == 0 && t.tm_min == 0 && t.tm_sec == 0)
-      {
+      if (t.tm_hour == 0 && t.tm_min == 0 && t.tm_sec == 0) {
         scheduleExecutedToday = false;
       }
     }
   }
 
-  if (deviceMode == "wifi")
-  {
+  if (deviceMode == "wifi") {
+    static unsigned long lastBleLog = 0;
+    if (millis() - lastBleLog > 5000) {
+      lastBleLog = millis();
+      // Serial.println("📡 CLAIM BLE active and advertising");
+    }
+  }
+
+  if (deviceMode == "wifi") {
     server.handleClient();
   }
 
-  if (deviceMode == "wifi")
-  {
+  if (deviceMode == "wifi") {
     ArduinoOTA.handle();
   }
 

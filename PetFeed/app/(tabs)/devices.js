@@ -27,6 +27,7 @@ import {
   connectToDevice,
   sendWifiCredentials,
   subscribeToNotifications,
+  sendClaimCommand,
 } from "../ble/bleManager";
 
 const STORAGE_KEY = "PETFEED_DEVICES";
@@ -118,7 +119,12 @@ export default function DevicesScreen() {
       startScan(
         (device) => {
           setOtherDevices((prev) => {
+            // Do not show devices that are already saved in "My Devices"
+            if (devices.find((d) => d.id === device.id)) return prev;
+
+            // Do not add duplicates
             if (prev.find((d) => d.id === device.id)) return prev;
+
             return [
               ...prev,
               {
@@ -425,7 +431,12 @@ IP Address: Unknown`,
     startScan(
       (device) => {
         setOtherDevices((prev) => {
+          // Do not show devices that are already saved in "My Devices"
+          if (devices.find((d) => d.id === device.id)) return prev;
+
+          // Do not add duplicates
           if (prev.find((d) => d.id === device.id)) return prev;
+
           return [
             ...prev,
             {
@@ -475,7 +486,7 @@ IP Address: Unknown`,
                 }
               });
 
-              await sendWifiCredentials("CLAIM");
+              await sendClaimCommand();
 
               // wait briefly for notification
               await new Promise((r) => setTimeout(r, 500));
@@ -510,7 +521,10 @@ IP Address: Unknown`,
         <View style={styles.header}>
           <Text style={[styles.title, { color: colors.text }]}>My Devices</Text>
           <TouchableOpacity
-            onPress={() => router.push("/(device-setup)/add-device")}
+            onPress={() => {
+              setBleScanMode("default");
+              router.push("/(device-setup)/add-device");
+            }}
           >
             <Text style={{ color: colors.tint, fontSize: 16 }}>
               Add Device +

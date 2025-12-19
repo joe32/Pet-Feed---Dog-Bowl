@@ -346,12 +346,22 @@ export default function HomeScreen() {
           </View>
         )}
 
-        <View style={styles.scheduleCard}>
+        <View
+          style={[
+            styles.scheduleCard,
+            scheme === "light" && styles.scheduleCardLight,
+          ]}
+        >
           <Text style={[styles.scheduleLabel, { color: colors.textSecondary }]}>
             SCHEDULE FEED
           </Text>
 
-          <View style={styles.timePill}>
+          <View
+            style={[
+              styles.timePill,
+              scheme === "light" && styles.timePillLight,
+            ]}
+          >
             <Text style={[styles.timeText, { color: colors.text }]}>
               {scheduledTime.toLocaleTimeString([], {
                 hour: "2-digit",
@@ -517,12 +527,21 @@ const styles = StyleSheet.create({
     backgroundColor: "#1c1c1e",
     alignItems: "center",
   },
+  scheduleCardLight: {
+    backgroundColor: "#ffffff",
+    shadowColor: "#000",
+    shadowOpacity: 0.08,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
+  },
 
   scheduleLabel: {
     fontSize: 12,
     letterSpacing: 1.2,
     fontWeight: "600",
     marginBottom: 16,
+    color: "#8e8e93",
   },
 
   timePill: {
@@ -531,6 +550,9 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: "#2c2c2e",
     marginBottom: 40,
+  },
+  timePillLight: {
+    backgroundColor: "#f2f2f7",
   },
 
   timeText: {

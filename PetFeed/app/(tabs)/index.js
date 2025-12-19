@@ -115,6 +115,7 @@ export default function HomeScreen() {
   }
 
   const currentDevice = devices.find(d => d.id === currentId);
+  const controlsDisabled = !currentDevice || currentDevice.online === false;
 
   async function sendCommand(command) {
     if (!currentDevice || !currentDevice.hostname) return;
@@ -208,12 +209,36 @@ export default function HomeScreen() {
         contentContainerStyle={{ flexGrow: 1, justifyContent: "center", alignItems: "center" }}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        <View style={styles.controlCard}>
-          <Text style={[styles.lidLabel, { color: colors.textSecondary }]}>
+        <View
+          style={[
+            styles.controlCard,
+            scheme === "light" && {
+              backgroundColor: "#ffffff",
+              shadowColor: "#000",
+              shadowOpacity: 0.08,
+              shadowRadius: 16,
+              shadowOffset: { width: 0, height: 8 },
+              elevation: 6,
+            },
+          ]}
+        >
+          <Text
+            style={[
+              styles.lidLabel,
+              { color: scheme === "light" ? "#6e6e73" : colors.textSecondary },
+            ]}
+          >
             LID STATUS
           </Text>
 
-          <View style={styles.lidStatePill}>
+          <View
+            style={[
+              styles.lidStatePill,
+              scheme === "light" && {
+                backgroundColor: "#f2f2f7",
+              },
+            ]}
+          >
             <View
               style={[
                 styles.lidDot,
@@ -227,7 +252,12 @@ export default function HomeScreen() {
                 },
               ]}
             />
-            <Text style={[styles.lidStateText, { color: colors.text }]}>
+            <Text
+              style={[
+                styles.lidStateText,
+                { color: scheme === "light" ? "#1c1c1e" : colors.text },
+              ]}
+            >
               {lidState
                 ? lidState === "OPEN"
                   ? "Open"
@@ -240,27 +270,27 @@ export default function HomeScreen() {
             <TouchableOpacity
               onPress={() => sendCommand("OPEN")}
               style={[
-                styles.primaryButton,
+                styles.primaryScheduleButton,
                 {
-                  backgroundColor: "#34C759",
+                  opacity: controlsDisabled ? 0.4 : 1,
                 },
               ]}
+              disabled={controlsDisabled}
             >
-              <Text style={styles.primaryButtonText}>Open Lid</Text>
+              <Text style={styles.primaryScheduleText}>Open Lid</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               onPress={() => sendCommand("CLOSE")}
               style={[
-                styles.secondaryButton,
+                styles.cancelScheduleButton,
                 {
-                  borderColor: "#ff3b30",
+                  opacity: controlsDisabled ? 0.4 : 1,
                 },
               ]}
+              disabled={controlsDisabled}
             >
-              <Text style={[styles.secondaryButtonText, { color: "#ff3b30" }]}>
-                Close Lid
-              </Text>
+              <Text style={styles.cancelScheduleText}>Close Lid</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -377,8 +407,8 @@ const styles = StyleSheet.create({
     maxWidth: 360,
     padding: 24,
     borderRadius: 28,
-    backgroundColor: "#1c1c1e",
     alignItems: "center",
+    backgroundColor: "#1c1c1e", // default for dark mode
   },
 
   lidLabel: {
@@ -394,8 +424,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 999,
-    backgroundColor: "#2c2c2e",
     marginBottom: 32,
+    backgroundColor: "#2c2c2e", // dark default
   },
 
   lidDot: {
@@ -436,6 +466,33 @@ const styles = StyleSheet.create({
 
   secondaryButtonText: {
     fontSize: 17,
+    fontWeight: "600",
+  },
+
+  primaryScheduleButton: {
+    backgroundColor: "#34C759",
+    paddingVertical: 16,
+    borderRadius: 18,
+    alignItems: "center",
+  },
+
+  primaryScheduleText: {
+    color: "#000",
+    fontSize: 17,
+    fontWeight: "700",
+  },
+
+  cancelScheduleButton: {
+    borderWidth: 2,
+    borderColor: "#ff3b30",
+    paddingVertical: 14,
+    borderRadius: 18,
+    alignItems: "center",
+  },
+
+  cancelScheduleText: {
+    color: "#ff3b30",
+    fontSize: 16,
     fontWeight: "600",
   },
 });

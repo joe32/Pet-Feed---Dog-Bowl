@@ -23,8 +23,6 @@ import {
   stopScan,
   connectToDevice,
   sendWifiCredentials,
-  writeCommand,
-  subscribeToNotifications,
 } from "../ble/bleManager";
 
 // Helper to generate a random hostname
@@ -61,72 +59,105 @@ export default function AddDeviceScreen() {
   const [manualSsid, setManualSsid] = useState(false);
   const [loadingWifi, setLoadingWifi] = useState(false);
   const [wifiTimedOut, setWifiTimedOut] = useState(false);
+  const [rebooting, setRebooting] = useState(false);
+  const [wifiScanStarted, setWifiScanStarted] = useState(false);
 
   // test to show popup on expo.
 
-  // useEffect(() => {
-  //   setSetupStep("wifi");
-  // }, []);
-
-useEffect(() => {
-  if (setupStep === "wifi") {
-    // Always start UI scanning immediately
-    scanWifiNetworks();
-  }
-}, [setupStep]);
-
-async function scanWifiNetworks() {
-  setLoadingWifi(true);
-  setWifiTimedOut(false);
-  setWifiNetworks([]);
-
-  let finished = false;
-
-  // UI timeout – ALWAYS fires after 10s
-  const uiTimeout = setTimeout(() => {
-    if (finished) return;
-    finished = true;
-    setLoadingWifi(false);
-    setWifiTimedOut(true);
-  }, 10000);
-
-  // If no hostname (Expo Go / preview), do NOT return early.
-  // Just let the spinner run until timeout.
-  if (!generatedHost) {
-    return;
-  }
-
-  const controller = new AbortController();
-  const abortTimeout = setTimeout(() => controller.abort(), 10000);
-
-  try {
-    const res = await fetch(`http://${generatedHost}.local/WIFISCAN`, {
-      signal: controller.signal,
-    });
-
-    if (!res.ok) throw new Error("Bad response");
-
-    const data = await res.json();
-    if (Array.isArray(data.networks)) {
-      setWifiNetworks(data.networks);
+  useEffect(() => {
+    setSetupStep("wifi");
+    setGeneratedHost("test-host");
+  }, []);
+  useEffect(() => {
+    if (wifiTimedOut) {
+      setLoadingWifi(false);
     }
-  } catch (e) {
-    // ignored – UI timeout handles state
-  } finally {
-    clearTimeout(abortTimeout);
-    if (!finished) {
-      finished = true;
-      clearTimeout(uiTimeout);
+  }, [wifiTimedOut]);
+
+  // (REMOVED: auto-start Wi-Fi scan when modal appears)
+
+  async function scanWifiNetworks() {
+    // Bump sequence so older scans are ignored
+    const seq = ++wifiScanSeqRef.current;
+    wifiActiveSeqRef.current = seq;
+
+    // Clear any previous timers / aborts
+    if (wifiUiTimeoutRef.current) {
+      clearTimeout(wifiUiTimeoutRef.current);
+      wifiUiTimeoutRef.current = null;
+    }
+    try {
+      if (wifiAbortRef.current) {
+        wifiAbortRef.current.abort();
+        wifiAbortRef.current = null;
+      }
+    } catch {}
+
+    setWifiScanStarted(true);
+    setLoadingWifi(true);
+    setWifiTimedOut(false);
+    setWifiNetworks([]);
+
+    // HARD UI TIMEOUT — this MUST always fire after 10s
+    wifiUiTimeoutRef.current = setTimeout(() => {
+      if (wifiActiveSeqRef.current !== seq) return;
+      console.log("scanWifiNetworks: HARD TIMEOUT");
+      try {
+        if (wifiAbortRef.current) wifiAbortRef.current.abort();
+      } catch {}
+      setLoadingWifi(false);
+      setWifiTimedOut(true);
+    }, 10000);
+
+    // Expo / preview: DO NOT attempt fetch, just wait for timeout
+    if (!generatedHost || generatedHost === "test-host") {
+      console.log("scanWifiNetworks: preview mode, skipping fetch");
+      return;
+    }
+
+    const controller = new AbortController();
+    wifiAbortRef.current = controller;
+
+    const url = `http://${generatedHost}.local/WIFISCAN`;
+    console.log("scanWifiNetworks: fetching", url);
+
+    try {
+      const res = await fetch(url, { signal: controller.signal });
+
+      if (wifiActiveSeqRef.current !== seq) return;
+
+      if (res.ok) {
+        const data = await res.json();
+        if (wifiActiveSeqRef.current !== seq) return;
+        if (Array.isArray(data?.networks)) {
+          setWifiNetworks(data.networks);
+        }
+      }
+    } catch (e) {
+      if (wifiActiveSeqRef.current !== seq) return;
+      console.log("scanWifiNetworks: fetch error", e?.message || e);
+    } finally {
+      if (wifiActiveSeqRef.current !== seq) return;
+
+      if (wifiUiTimeoutRef.current) {
+        clearTimeout(wifiUiTimeoutRef.current);
+        wifiUiTimeoutRef.current = null;
+      }
+      wifiAbortRef.current = null;
+
       setLoadingWifi(false);
       setWifiTimedOut(true);
     }
   }
-}
 
   // Track the generated hostname during setup
   const [generatedHost, setGeneratedHost] = useState(null);
 
   const timeoutRef = useRef(null);
+  const wifiScanSeqRef = useRef(0);
+  const wifiUiTimeoutRef = useRef(null);
+  const wifiAbortRef = useRef(null);
+  const wifiActiveSeqRef = useRef(0);
 
   useEffect(() => {
     return () => {
@@ -135,6 +166,17 @@ async function scanWifiNetworks() {
         clearTimeout(timeoutRef.current);
         timeoutRef.current = null;
       }
+
+      if (wifiUiTimeoutRef.current) {
+        clearTimeout(wifiUiTimeoutRef.current);
+        wifiUiTimeoutRef.current = null;
+      }
+      try {
+        if (wifiAbortRef.current) {
+          wifiAbortRef.current.abort();
+          wifiAbortRef.current = null;
+        }
+      } catch {}
     };
   }, []);
 
@@ -148,7 +190,6 @@ async function scanWifiNetworks() {
   }, []);
 
   async function beginScan() {
-    setBleScanMode("default");
     if (scanning) return;
 
     // Ensure any previous scan is fully stopped
@@ -469,13 +510,85 @@ async function scanWifiNetworks() {
               </Text>
 
               {/* Wi-Fi networks list container */}
-              <View style={styles.wifiListBox}>
-                {loadingWifi && (
-                  <View style={styles.wifiSpinnerCorner}>
-                    <ActivityIndicator size="small" color={colors.tint} />
+              <View
+                style={[
+                  styles.wifiListBox,
+                  {
+                    backgroundColor: scheme === "dark" ? "#0f172a" : "#fafbfc",
+                    borderColor: scheme === "dark" ? "#ffffff22" : "#00000022",
+                  },
+                ]}
+              >
+                {!wifiScanStarted && (
+                  <TouchableOpacity
+                    onPress={scanWifiNetworks}
+                    style={{
+                      backgroundColor: scheme === "dark" ? "#1f2933" : colors.tint,
+                      paddingVertical: 10,
+                      paddingHorizontal: 18,
+                      borderRadius: 10,
+                      borderWidth: scheme === "dark" ? 1 : 0,
+                      borderColor: scheme === "dark" ? colors.tint : "transparent",
+                    }}
+                  >
+                    <Text
+                      style={{
+                        color: scheme === "dark" ? colors.tint : colors.background,
+                        fontWeight: "600",
+                        fontSize: 16,
+                      }}
+                    >
+                      Search for local networks
+                    </Text>
+                  </TouchableOpacity>
+                )}
+
+                {wifiScanStarted && loadingWifi && (
+                  <View
+                    style={[
+                      styles.wifiSpinnerCorner,
+                      {
+                        backgroundColor:
+                          scheme === "dark" ? "#1f2937" : "#ffffff",
+                      },
+                    ]}
+                  >
+                    <ActivityIndicator
+                      size="small"
+                      color={scheme === "dark" ? "#ffffff" : colors.tint}
+                    />
                   </View>
                 )}
-                {loadingWifi ? null : wifiNetworks.length > 0 ? (
+                {wifiScanStarted && wifiTimedOut && (
+                  <TouchableOpacity
+                    onPress={() => {
+                      setWifiTimedOut(false);
+                      setWifiNetworks([]);
+                      scanWifiNetworks();
+                    }}
+                    style={[
+                      styles.wifiRescanCorner,
+                      {
+                        backgroundColor:
+                          scheme === "dark" ? "#0b1220" : "#ffffffee",
+                        borderColor:
+                          scheme === "dark" ? "#ffffff33" : "#00000022",
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={{
+                        color: scheme === "dark" ? "#ffffff" : colors.tint,
+                        fontWeight: "600",
+                        fontSize: 12,
+                      }}
+                    >
+                      Re-scan
+                    </Text>
+                  </TouchableOpacity>
+                )}
+
+                {wifiScanStarted && !loadingWifi && wifiNetworks.length > 0 && (
                   <ScrollView
                     style={{ flex: 1 }}
                     contentContainerStyle={{ paddingVertical: 0 }}
@@ -505,31 +618,41 @@ async function scanWifiNetworks() {
                       </TouchableOpacity>
                     ))}
                   </ScrollView>
-                ) : (
-                  !loadingWifi && (
-                    <View style={styles.wifiNoNetworksBox}>
-                      <Text
-                        style={{
-                          color: colors.textSecondary,
-                          fontSize: 16,
-                          textAlign: "center",
-                        }}
-                      >
-                        No networks found
-                      </Text>
-                    </View>
-                  )
+                )}
+
+                {wifiScanStarted && wifiTimedOut && wifiNetworks.length === 0 && (
+                  <View style={styles.wifiNoNetworksBox}>
+                    <Text
+                      style={{
+                        color: colors.textSecondary,
+                        fontSize: 16,
+                        textAlign: "center",
+                      }}
+                    >
+                      No networks found
+                    </Text>
+                  </View>
                 )}
               </View>
 
               {/* Wi-Fi actions row: Re-scan and Enter manually */}
               <View style={styles.wifiActionsRow}>
-                {wifiTimedOut && (
+                {wifiTimedOut === true && (
                   <TouchableOpacity
-                    onPress={scanWifiNetworks}
+                    onPress={() => {
+                      setWifiScanStarted(false);
+                      setWifiNetworks([]);
+                      setWifiTimedOut(false);
+                    }}
                     style={styles.wifiRescanButton}
                   >
-                    <Text style={{ color: colors.tint, fontWeight: "600", fontSize: 14 }}>
+                    <Text
+                      style={{
+                        color: colors.tint,
+                        fontWeight: "600",
+                        fontSize: 14,
+                      }}
+                    >
                       Re‑scan networks
                     </Text>
                   </TouchableOpacity>
@@ -562,6 +685,7 @@ async function scanWifiNetworks() {
                   placeholderTextColor={colors.textSecondary}
                   autoCapitalize="none"
                   autoCorrect={false}
+                  editable={!rebooting}
                 />
               )}
 
@@ -581,6 +705,7 @@ async function scanWifiNetworks() {
                 autoCapitalize="none"
                 autoCorrect={false}
                 secureTextEntry
+                editable={!rebooting}
               />
               <TouchableOpacity
                 style={[
@@ -589,24 +714,23 @@ async function scanWifiNetworks() {
                     backgroundColor: ssid ? colors.tint : "#999",
                   },
                 ]}
-                disabled={!ssid}
+                disabled={!ssid || rebooting}
                 onPress={async () => {
-                  // Send Wi‑Fi credentials to ESP over BLE.
-                  // The ESP reboots immediately after saving, which can cause BLE to drop.
-                  // That is expected and should NOT fail setup.
+                  if (rebooting) return;
+
+                  setRebooting(true);
+
                   try {
                     await sendWifiCredentials(
                       `WIFI:ssid=${ssid};pass=${password};host=${generatedHost}`
                     );
                   } catch (e) {
-                    // Ignore BLE errors caused by ESP reboot
                     console.log("BLE ended after Wi‑Fi write (expected):", e);
                   }
 
-                  // Small delay to allow write to flush before BLE drops
+                  // Give ESP time to reboot before navigation
                   await new Promise((r) => setTimeout(r, 300));
 
-                  // Persist device locally (do NOT store password)
                   await saveDeviceAndReturn(
                     pendingDevice,
                     deviceName,
@@ -615,9 +739,24 @@ async function scanWifiNetworks() {
                   );
                 }}
               >
-                <Text style={{ color: colors.background, fontWeight: "600" }}>
-                  Save & Continue
-                </Text>
+                {rebooting ? (
+                  <View style={{ flexDirection: "row", alignItems: "center" }}>
+                    <ActivityIndicator color={colors.background} />
+                    <Text
+                      style={{
+                        color: colors.background,
+                        fontWeight: "600",
+                        marginLeft: 10,
+                      }}
+                    >
+                      Rebooting…
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={{ color: colors.background, fontWeight: "600" }}>
+                    Save & Continue
+                  </Text>
+                )}
               </TouchableOpacity>
             </View>
           </KeyboardAvoidingView>
@@ -777,7 +916,20 @@ const styles = StyleSheet.create({
   wifiSpinnerCorner: {
     position: "absolute",
     top: 8,
-    left: 8,
+    right: 8,
     zIndex: 10,
+    padding: 4,
+    borderRadius: 10,
+    // backgroundColor added dynamically in render for dark/light mode
+  },
+  wifiRescanCorner: {
+    position: "absolute",
+    bottom: 6,
+    right: 6,
+    zIndex: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    borderWidth: 1,
   },
 });
