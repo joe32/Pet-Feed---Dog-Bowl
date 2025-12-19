@@ -107,8 +107,16 @@ const int buzzerPin = 5;
 const int buzzerChannel = 7;
 const int buzzerResolution = 8;
 
+// ================= RESET BUTTON =================
+const int resetButtonPin = 7;   // push button to GND
+bool resetButtonLast = HIGH;
+unsigned long resetButtonPressStart = 0;
+bool resetTriggered = false;
+
 void toneOn(int freq) {
   ledcWriteTone(buzzerChannel, freq);
+  // Force maximum duty cycle for loudest possible output
+  ledcWrite(buzzerChannel, 255);
 }
 
 void toneOff() {
@@ -701,11 +709,15 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
 
+  pinMode(resetButtonPin, INPUT_PULLUP);
+
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LOW);
 
   ledcSetup(buzzerChannel, 2000, buzzerResolution);
   ledcAttachPin(buzzerPin, buzzerChannel);
+  // Ensure buzzer starts at max duty when active
+  ledcWrite(buzzerChannel, 255);
   toneOff();
 
   myServo.attach(servoPin);
@@ -751,6 +763,55 @@ void setup() {
 
 // ================= LOOP =================
 void loop() {
+  // ================= RESET BUTTON HANDLING =================
+  bool resetButtonState = digitalRead(resetButtonPin);
+
+  // Button pressed (HIGH -> LOW)
+  if (resetButtonLast == HIGH && resetButtonState == LOW) {
+    Serial.println("🔘 Reset button PRESSED");
+    resetButtonPressStart = millis();
+    resetTriggered = false;
+  }
+
+  // Button held down
+  if (resetButtonState == LOW && resetButtonPressStart > 0) {
+    unsigned long heldMs = millis() - resetButtonPressStart;
+
+    static unsigned long lastDot = 0;
+    if (millis() - lastDot >= 500) {
+      lastDot = millis();
+      Serial.print(".");
+    }
+
+    // After 5 seconds: start continuous danger tone
+    if (heldMs >= 5000 && !resetTriggered) {
+      Serial.println();
+      Serial.println("🚨 RESET ARMING — RELEASE TO CONFIRM");
+      toneOn(2800);   // continuous high‑pitched warning tone
+      resetTriggered = true;
+    }
+  }
+
+  // Button released (LOW -> HIGH)
+  if (resetButtonLast == LOW && resetButtonState == HIGH) {
+    Serial.println();
+    Serial.println("🔘 Reset button RELEASED");
+
+    // If reset was armed, releasing triggers factory reset
+    if (resetTriggered) {
+      Serial.println("🧨 FACTORY RESET CONFIRMED");
+      toneOff();
+      delay(200);
+      factoryReset();
+      ESP.restart();
+    }
+
+    resetButtonPressStart = 0;
+    resetTriggered = false;
+  }
+
+  resetButtonLast = resetButtonState;
+
   if (Serial.available()) {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim();
