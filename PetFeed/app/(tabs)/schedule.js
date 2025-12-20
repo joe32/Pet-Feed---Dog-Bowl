@@ -51,6 +51,9 @@ export default function HomeScreen() {
   const [scheduledTime, setScheduledTime] = useState(new Date());
   const androidTempTimeRef = useRef(null);
 
+  const lastLidFetchRef = useRef(0);
+  const lastScheduleFetchRef = useRef(0);
+
   // Memoised Android time picker to prevent re-render resets (ANDROID ONLY)
   const androidTimePicker = useMemo(() => {
     if (Platform.OS !== "android" || !showPicker) return null;
@@ -101,11 +104,6 @@ export default function HomeScreen() {
       fireDate.setSeconds(0);
       fireDate.setMilliseconds(0);
 
-      // Ensure iOS does not silently drop the notification
-      if (fireDate <= new Date(Date.now() + 5000)) {
-        fireDate.setDate(fireDate.getDate() + 1);
-      }
-
       const id = await Notifications.scheduleNotificationAsync({
         content: {
           title: "PetFeed",
@@ -152,7 +150,8 @@ export default function HomeScreen() {
       }
 
       await scheduleFeedNotification(notifyDate);
-      await fetchScheduleState();
+      await fetchScheduleState(true);
+      await fetchLidState(true);
     } catch (e) {
       console.log("Failed to schedule feed", e);
     }
@@ -166,7 +165,8 @@ export default function HomeScreen() {
         method: "POST",
       });
       await cancelFeedNotification();
-      await fetchScheduleState();
+      await fetchScheduleState(true);
+      await fetchLidState(true);
     } catch (e) {
       console.log("Failed to cancel schedule", e);
     }
@@ -188,8 +188,13 @@ export default function HomeScreen() {
     }
   }
 
-  async function fetchScheduleState() {
+  async function fetchScheduleState(force = false) {
     if (!currentDevice || !currentDevice.hostname) return;
+
+    const now = Date.now();
+    if (!force && now - lastScheduleFetchRef.current < 20000) return;
+    lastScheduleFetchRef.current = now;
+
     try {
       const res = await fetch(`http://${currentDevice.hostname}/GETSCHEDULE`);
       const data = await res.json();
@@ -202,7 +207,7 @@ export default function HomeScreen() {
         } else {
           setScheduledLabel(null);
         }
-      } else if (data.hasSchedule === false) {
+      } else {
         setHasScheduledFeed(false);
         setScheduledLabel(null);
       }
@@ -212,13 +217,20 @@ export default function HomeScreen() {
   }
 
   // Lid state polling helper
-  async function fetchLidState() {
+  async function fetchLidState(force = false) {
     if (!currentDevice || !currentDevice.hostname) return;
+
+    const now = Date.now();
+    if (!force && now - lastLidFetchRef.current < 20000) return;
+    lastLidFetchRef.current = now;
+
     try {
       const res = await fetch(`http://${currentDevice.hostname}/GETSTATE`);
       const data = await res.json();
       if (data.state === "OPEN" || data.state === "CLOSED") {
         setLidState(data.state);
+      } else {
+        setLidState(null);
       }
     } catch (e) {
       console.log("Failed to fetch lid state", e);
@@ -278,7 +290,7 @@ export default function HomeScreen() {
       }
     }
 
-    interval = setInterval(checkAllDevices, 8000);
+    interval = setInterval(checkAllDevices, 5000);
     checkAllDevices();
 
     return () => clearInterval(interval);
@@ -312,6 +324,7 @@ export default function HomeScreen() {
       if (!res.ok) {
         throw new Error("Non-200 response");
       }
+      await fetchLidState(true);
     } catch (e) {
       console.log("Command failed", e);
     }
@@ -331,6 +344,8 @@ export default function HomeScreen() {
       setDevices(updatedDevices);
     }
     await loadDevices();
+    await fetchScheduleState(true);
+    await fetchLidState(true);
     setRefreshing(false);
   }, [devices, loadDevices]);
 

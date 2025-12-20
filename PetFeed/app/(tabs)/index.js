@@ -2,7 +2,7 @@ import { View, Text, TouchableOpacity, StyleSheet, Modal, Pressable, ScrollView,
 import { useColorScheme } from "react-native";
 import { Colors } from "../../constants/theme";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 
@@ -18,6 +18,9 @@ export default function HomeScreen() {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [lidState, setLidState] = useState(null);
+
+  const lastPingRef = useRef(0);
+  const lastLidFetchRef = useRef(0);
 
   async function pingDevice(hostname) {
     try {
@@ -75,26 +78,39 @@ export default function HomeScreen() {
     async function checkAllDevices() {
       if (devices.length === 0) return;
 
-      const updatedDevices = await Promise.all(
-        devices.map(async device => {
-          if (!device.hostname) return device;
-          const isOnline = await pingDevice(device.hostname);
-          return { ...device, online: isOnline };
-        })
-      );
+      const now = Date.now();
 
-      setDevices(updatedDevices);
+      let updatedDevices = devices;
 
-      // If current device is offline, update UI immediately
-      const currentDeviceUpdated = updatedDevices.find(d => d.id === currentId);
-      if (currentDeviceUpdated && currentDeviceUpdated.online === false) {
-        setCurrentId(currentDeviceUpdated.id); // keep currentId but UI will read online false
+      // ---- PING every 5 seconds ----
+      if (now - lastPingRef.current > 5000) {
+        lastPingRef.current = now;
+
+        updatedDevices = await Promise.all(
+          devices.map(async device => {
+            if (!device.hostname) return device;
+            const isOnline = await pingDevice(device.hostname);
+            return { ...device, online: isOnline };
+          })
+        );
+
+        setDevices(updatedDevices);
       }
 
-      // Also poll lid state continuously (every tick)
-      if (currentDeviceUpdated && currentDeviceUpdated.online) {
+      const currentDeviceUpdated = updatedDevices.find(d => d.id === currentId);
+
+      // ---- GETSTATE every 20 seconds ----
+      if (
+        currentDeviceUpdated &&
+        currentDeviceUpdated.online &&
+        now - lastLidFetchRef.current > 20000
+      ) {
+        lastLidFetchRef.current = now;
+
         try {
-          const res = await fetch(`http://${currentDeviceUpdated.hostname}/GETSTATE`);
+          const res = await fetch(
+            `http://${currentDeviceUpdated.hostname}/GETSTATE`
+          );
           const json = await res.json();
           setLidState(json.state);
         } catch {}
@@ -136,6 +152,14 @@ export default function HomeScreen() {
       if (!res.ok) {
         throw new Error("Non-200 response");
       }
+
+      // Immediately refresh lid state after a command
+      try {
+        const stateRes = await fetch(`http://${currentDevice.hostname}/GETSTATE`);
+        const stateJson = await stateRes.json();
+        setLidState(stateJson.state);
+        lastLidFetchRef.current = Date.now(); // keep throttling in sync
+      } catch {}
     } catch (e) {
       console.log("Command failed", e);
     }
