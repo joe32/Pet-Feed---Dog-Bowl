@@ -544,7 +544,6 @@ IP Address: Unknown`,
           <Text style={[styles.title, { color: colors.text }]}>My Devices</Text>
           <TouchableOpacity
             onPress={() => {
-              setBleScanMode("default");
               router.push("/(device-setup)/add-device");
             }}
           >
