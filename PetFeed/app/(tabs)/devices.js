@@ -7,7 +7,7 @@ import {
   Alert,
   RefreshControl,
   ScrollView,
-  ActivityIndicator,
+  // ActivityIndicator,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useColorScheme } from "react-native";
@@ -21,13 +21,13 @@ import {
 } from "react-native-gesture-handler";
 import {
   initBle,
-  startScan,
-  stopScan,
-  setBleScanMode,
-  connectToDevice,
-  sendWifiCredentials,
-  subscribeToNotifications,
-  sendClaimCommand,
+  // startScan,
+  // stopScan,
+  // setBleScanMode,
+  // connectToDevice,
+  // sendWifiCredentials,
+  // subscribeToNotifications,
+  // sendClaimCommand,
 } from "../ble/bleManager";
 
 const STORAGE_KEY = "PETFEED_DEVICES";
@@ -55,9 +55,9 @@ export default function DevicesScreen() {
   const [devices, setDevices] = useState([]);
   const [activeDeviceId, setActiveDeviceId] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
-  const [otherDevices, setOtherDevices] = useState([]);
-  const [scanning, setScanning] = useState(true);
-  const [scanTimedOut, setScanTimedOut] = useState(false);
+  // const [otherDevices, setOtherDevices] = useState([]);
+  // const [scanning, setScanning] = useState(true);
+  // const [scanTimedOut, setScanTimedOut] = useState(false);
   // Modal state for adding local device
   const [addingLocalDevice, setAddingLocalDevice] = useState(null);
   const [localDeviceName, setLocalDeviceName] = useState("");
@@ -83,6 +83,28 @@ export default function DevicesScreen() {
     }
   }, []);
 
+  // 🔧 TEMP: fake devices for Expo Go preview
+
+  // useEffect(() => {
+  //   setDevices([
+  //     {
+  //       id: "FAKE-DEVICE-001",
+  //       name: "Pet Feeder",
+  //       host: "petfeeder-kitchen",
+  //       mode: "wifi",
+  //       online: true,
+  //     },
+  //     {
+  //       id: "FAKE-DEVICE-002",
+  //       name: "feeder",
+  //       host: "petfeeder-garden",
+  //       mode: "local",
+  //       online: false,
+  //     },
+  //   ]);
+
+  //   setActiveDeviceId("FAKE-DEVICE-001");
+  // }, []);
 
   useEffect(() => {
     loadDevices();
@@ -106,49 +128,49 @@ export default function DevicesScreen() {
     }, [])
   );
 
-  useFocusEffect(
-    useCallback(() => {
-      setScanning(true);
-      setScanTimedOut(false);
-      setOtherDevices([]);
-
-      // Switch BLE into CLAIM mode for "other devices"
-      setBleScanMode("claim");
-      stopScan();
-
-      startScan(
-        (device) => {
-          setOtherDevices((prev) => {
-            // Do not show devices that are already saved in "My Devices"
-            if (devices.find((d) => d.id === device.id)) return prev;
-
-            // Do not add duplicates
-            if (prev.find((d) => d.id === device.id)) return prev;
-
-            return [
-              ...prev,
-              {
-                id: device.id,
-                name: device.name || "PetFeeder",
-              },
-            ];
-          });
-        },
-        () => {}
-      );
-
-      const timeout = setTimeout(() => {
-        stopScan();
-        setScanning(false);
-        setScanTimedOut(true);
-      }, 10000);
-
-      return () => {
-        clearTimeout(timeout);
-        stopScan();
-      };
-    }, [])
-  );
+  // useFocusEffect(
+  //   useCallback(() => {
+  //     setScanning(true);
+  //     setScanTimedOut(false);
+  //     setOtherDevices([]);
+  //
+  //     // Switch BLE into CLAIM mode for "other devices"
+  //     setBleScanMode("claim");
+  //     stopScan();
+  //
+  //     startScan(
+  //       (device) => {
+  //         setOtherDevices((prev) => {
+  //           // Do not show devices that are already saved in "My Devices"
+  //           if (devices.find((d) => d.id === device.id)) return prev;
+  //
+  //           // Do not add duplicates
+  //           if (prev.find((d) => d.id === device.id)) return prev;
+  //
+  //           return [
+  //             ...prev,
+  //             {
+  //               id: device.id,
+  //               name: device.name || "PetFeeder",
+  //             },
+  //           ];
+  //         });
+  //       },
+  //       () => {}
+  //     );
+  //
+  //     const timeout = setTimeout(() => {
+  //       stopScan();
+  //       setScanning(false);
+  //       setScanTimedOut(true);
+  //     }, 10000);
+  //
+  //     return () => {
+  //       clearTimeout(timeout);
+  //       stopScan();
+  //     };
+  //   }, [])
+  // );
 
   useEffect(() => {
     const id = setInterval(async () => {
@@ -420,100 +442,100 @@ IP Address: Unknown`,
     );
   }
 
-  function retryDiscovery() {
-    setOtherDevices([]);
-    setScanTimedOut(false);
-    setScanning(true);
+  // function retryDiscovery() {
+  //   setOtherDevices([]);
+  //   setScanTimedOut(false);
+  //   setScanning(true);
+  //
+  //   setBleScanMode("claim");
+  //   stopScan();
+  //
+  //   startScan(
+  //     (device) => {
+  //       setOtherDevices((prev) => {
+  //         // Do not show devices that are already saved in "My Devices"
+  //         if (devices.find((d) => d.id === device.id)) return prev;
+  //
+  //         // Do not add duplicates
+  //         if (prev.find((d) => d.id === device.id)) return prev;
+  //
+  //         return [
+  //           ...prev,
+  //           {
+  //             id: device.id,
+  //             name: device.name || "PetFeeder",
+  //           },
+  //         ];
+  //       });
+  //     },
+  //     () => {}
+  //   );
+  //
+  //   setTimeout(() => {
+  //     stopScan();
+  //     setScanning(false);
+  //     setScanTimedOut(true);
+  //   }, 10000);
+  // }
 
-    setBleScanMode("claim");
-    stopScan();
-
-    startScan(
-      (device) => {
-        setOtherDevices((prev) => {
-          // Do not show devices that are already saved in "My Devices"
-          if (devices.find((d) => d.id === device.id)) return prev;
-
-          // Do not add duplicates
-          if (prev.find((d) => d.id === device.id)) return prev;
-
-          return [
-            ...prev,
-            {
-              id: device.id,
-              name: device.name || "PetFeeder",
-            },
-          ];
-        });
-      },
-      () => {}
-    );
-
-    setTimeout(() => {
-      stopScan();
-      setScanning(false);
-      setScanTimedOut(true);
-    }, 10000);
-  }
-
-  function renderOtherDevice(device) {
-    return (
-      <View
-        key={device.id}
-        style={[styles.card, { backgroundColor: colors.card, opacity: 0.9 }]}
-      >
-        <View style={[styles.statusDot, { backgroundColor: "#34C759" }]} />
-        <View style={{ flex: 1 }}>
-          <Text style={[styles.deviceName, { color: colors.text }]}>
-            {device.name}
-          </Text>
-          <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
-            {device.id}
-          </Text>
-        </View>
-        <TouchableOpacity
-          onPress={async () => {
-            try {
-              setBleScanMode("claim");
-              await connectToDevice(device.id);
-
-              // Ask ESP for its hostname via CLAIM
-              let resolvedHost = null;
-
-              const unsub = subscribeToNotifications((msg) => {
-                if (typeof msg === "string" && msg.startsWith("HOST:")) {
-                  resolvedHost = msg.replace("HOST:", "").trim();
-                }
-              });
-
-              await sendClaimCommand();
-
-              // wait briefly for notification
-              await new Promise((r) => setTimeout(r, 500));
-              unsub();
-
-              if (!resolvedHost) {
-                throw new Error("No hostname returned from device");
-              }
-
-              setAddingLocalDevice({
-                ...device,
-                host: resolvedHost,
-              });
-              setLocalDeviceName(device.name);
-            } catch (e) {
-              Alert.alert(
-                "Connection failed",
-                "Could not claim this device. Make sure it is powered on and nearby."
-              );
-            }
-          }}
-        >
-          <Text style={{ color: colors.tint, fontWeight: "600" }}>Add</Text>
-        </TouchableOpacity>
-      </View>
-    );
-  }
+  // function renderOtherDevice(device) {
+  //   return (
+  //     <View
+  //       key={device.id}
+  //       style={[styles.card, { backgroundColor: colors.card, opacity: 0.9 }]}
+  //     >
+  //       <View style={[styles.statusDot, { backgroundColor: "#34C759" }]} />
+  //       <View style={{ flex: 1 }}>
+  //         <Text style={[styles.deviceName, { color: colors.text }]}>
+  //           {device.name}
+  //         </Text>
+  //         <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+  //           {device.id}
+  //         </Text>
+  //       </View>
+  //       <TouchableOpacity
+  //         onPress={async () => {
+  //           try {
+  //             setBleScanMode("claim");
+  //             await connectToDevice(device.id);
+  //
+  //             // Ask ESP for its hostname via CLAIM
+  //             let resolvedHost = null;
+  //
+  //             const unsub = subscribeToNotifications((msg) => {
+  //               if (typeof msg === "string" && msg.startsWith("HOST:")) {
+  //                 resolvedHost = msg.replace("HOST:", "").trim();
+  //               }
+  //             });
+  //
+  //             await sendClaimCommand();
+  //
+  //             // wait briefly for notification
+  //             await new Promise((r) => setTimeout(r, 500));
+  //             unsub();
+  //
+  //             if (!resolvedHost) {
+  //               throw new Error("No hostname returned from device");
+  //             }
+  //
+  //             setAddingLocalDevice({
+  //               ...device,
+  //               host: resolvedHost,
+  //             });
+  //             setLocalDeviceName(device.name);
+  //           } catch (e) {
+  //             Alert.alert(
+  //               "Connection failed",
+  //               "Could not claim this device. Make sure it is powered on and nearby."
+  //             );
+  //           }
+  //         }}
+  //       >
+  //         <Text style={{ color: colors.tint, fontWeight: "600" }}>Add</Text>
+  //       </TouchableOpacity>
+  //     </View>
+  //   );
+  // }
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -551,6 +573,7 @@ IP Address: Unknown`,
           ) : (
             <>{devices.map(renderDevice)}</>
           )}
+          {/*
           <View style={{ marginTop: 32 }}>
             <Text
               style={[styles.sectionTitle, { color: colors.textSecondary }]}
@@ -592,7 +615,39 @@ IP Address: Unknown`,
 
             {otherDevices.map(renderOtherDevice)}
           </View>
+          */}
         </ScrollView>
+        {/* Feature request / bug report link */}
+        <View
+          style={{
+            position: "absolute",
+            bottom: 90,
+            left: 0,
+            right: 0,
+            alignItems: "center",
+          }}
+        >
+          <TouchableOpacity
+            onPress={async () => {
+              const url =
+                "https://docs.google.com/forms/d/e/1FAIpQLSeK09tSetMjIBSNJGb8ljF9vkiKjq6H_mBQQ83d0lsXaOZrWQ/viewform";
+              const supported = await Linking.canOpenURL(url);
+              if (supported) {
+                await Linking.openURL(url);
+              }
+            }}
+          >
+            <Text
+              style={{
+                fontSize: 13,
+                color: colors.textSecondary,
+                textDecorationLine: "underline",
+              }}
+            >
+              Found a bug or have a feature idea? Tell us
+            </Text>
+          </TouchableOpacity>
+        </View>
       </SafeAreaView>
       {addingLocalDevice && (
         <View style={styles.modalOverlay}>

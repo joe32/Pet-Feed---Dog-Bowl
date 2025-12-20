@@ -7,6 +7,10 @@
   - Time sync (UK)
 */
 
+// NOTE:
+// BLE is ONLY active during initial setup (BLE mode).
+// When deviceMode == "wifi", BLE is fully disabled to avoid Wi‑Fi instability.
+
 #include <BLEDevice.h>
 #include <BLEUtils.h>
 #include <BLEServer.h>
@@ -258,7 +262,7 @@ void factoryReset() {
 
   BLEDevice::deinit(true);
   delay(200);
-  BLEDevice::init("PetFeeder1");
+  // BLEDevice::init("PetFeeder1"); // BLE disabled until setup mode
 
   wifiSSID = "";
   wifiPASS = "";
@@ -305,33 +309,38 @@ class ClaimServerCallbacks : public BLEServerCallbacks {
 void startWifiMode() {
   Serial.println("📡 Wi-Fi mode");
 
+  // ===== BLE DISABLED IN WIFI MODE =====
   Serial.println("🔧 Initialising CLAIM BLE service");
 
-  BLEDevice::init("PetFeeder");
+  // BLEDevice::init("PetFeeder");
+  //
+  // pClaimServer = BLEDevice::createServer();
+  // pClaimServer->setCallbacks(new ClaimServerCallbacks());
+  //
+  // pClaimService = pClaimServer->createService(CLAIM_SERVICE_UUID);
+  //
+  // pClaimCharacteristic = pClaimService->createCharacteristic(
+  //   CLAIM_CHARACTERISTIC_UUID,
+  //   BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY);
+  //
+  // pClaimCharacteristic->addDescriptor(new BLE2902());
+  // pClaimCharacteristic->setCallbacks(new ClaimCharacteristicCallbacks());
+  //
+  // pClaimService->start();
+  //
+  // BLEAdvertising *adv = BLEDevice::getAdvertising();
+  // adv->stop();
+  // adv->addServiceUUID(CLAIM_SERVICE_UUID);
+  //
+  // // Slow BLE advertising to coexist with Wi‑Fi
+  // adv->setMinInterval(0x200); // ~320ms
+  // adv->setMaxInterval(0x400); // ~640ms
+  //
+  // adv->start();
 
-  pClaimServer = BLEDevice::createServer();
-  pClaimServer->setCallbacks(new ClaimServerCallbacks());
-
-  pClaimService = pClaimServer->createService(CLAIM_SERVICE_UUID);
-
-  pClaimCharacteristic = pClaimService->createCharacteristic(
-    CLAIM_CHARACTERISTIC_UUID,
-    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY);
-
-  pClaimCharacteristic->addDescriptor(new BLE2902());
-  pClaimCharacteristic->setCallbacks(new ClaimCharacteristicCallbacks());
-
-  pClaimService->start();
-
-  BLEAdvertising *adv = BLEDevice::getAdvertising();
-  adv->stop();
-  adv->addServiceUUID(CLAIM_SERVICE_UUID);
-
-  // Slow BLE advertising to coexist with Wi‑Fi
-  adv->setMinInterval(0x200); // ~320ms
-  adv->setMaxInterval(0x400); // ~640ms
-
-  adv->start();
+  // Explicitly disable BLE while in Wi‑Fi mode to prevent radio contention
+  BLEDevice::deinit(true);
+  delay(200);
 
   Serial.println("🔵 CLAIM BLE advertising started (Wi‑Fi mode)");
 
@@ -867,13 +876,13 @@ void loop() {
     }
   }
 
-  if (deviceMode == "wifi") {
-    static unsigned long lastBleLog = 0;
-    if (millis() - lastBleLog > 5000) {
-      lastBleLog = millis();
-      // Serial.println("📡 CLAIM BLE active and advertising");
-    }
-  }
+  // if (deviceMode == "wifi") {
+  //   static unsigned long lastBleLog = 0;
+  //   if (millis() - lastBleLog > 5000) {
+  //     lastBleLog = millis();
+  //     // BLE intentionally disabled in Wi‑Fi mode
+  //   }
+  // }
 
   if (deviceMode == "wifi") {
     server.handleClient();

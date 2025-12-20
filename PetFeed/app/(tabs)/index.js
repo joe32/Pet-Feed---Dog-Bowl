@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, StyleSheet, Modal, Pressable, ScrollView, RefreshControl } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, Modal, Pressable, ScrollView, RefreshControl, Linking } from "react-native";
 import { useColorScheme } from "react-native";
 import { Colors } from "../../constants/theme";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -178,18 +178,29 @@ export default function HomeScreen() {
               <View
                 style={[
                   styles.statusDot,
-                  { backgroundColor: currentDevice.online ? "#3ddc84" : "#777" },
+                  {
+                    backgroundColor: currentDevice.online ? "#3ddc84" : "#777",
+                  },
                 ]}
               />
               <Text
-                style={{ color: colors.textSecondary, fontSize: 14 }}
+                style={{ color: colors.textSecondary, fontSize: 16 }}
                 numberOfLines={1}
               >
                 {currentDevice.name} · {currentDevice.online ? "Online" : "Offline"}
               </Text>
+              <Text
+                style={{
+                  marginLeft: 6,
+                  fontSize: 16,
+                  color: colors.textSecondary,
+                }}
+              >
+                ▾
+              </Text>
             </TouchableOpacity>
           ) : (
-            <Text style={{ color: colors.textSecondary, fontSize: 14 }}>
+            <Text style={{ color: colors.textSecondary, fontSize: 16 }}>
               No device
             </Text>
           )}
@@ -328,6 +339,37 @@ export default function HomeScreen() {
           </View>
         </Pressable>
       </Modal>
+      {/* Feature request / bug report link */}
+      <View
+        style={{
+          position: "absolute",
+          bottom: 90,
+          left: 0,
+          right: 0,
+          alignItems: "center",
+        }}
+      >
+        <TouchableOpacity
+          onPress={async () => {
+            const url =
+              "https://docs.google.com/forms/d/e/1FAIpQLSeK09tSetMjIBSNJGb8ljF9vkiKjq6H_mBQQ83d0lsXaOZrWQ/viewform";
+            const supported = await Linking.canOpenURL(url);
+            if (supported) {
+              await Linking.openURL(url);
+            }
+          }}
+        >
+          <Text
+            style={{
+              fontSize: 13,
+              color: colors.textSecondary,
+              textDecorationLine: "underline",
+            }}
+          >
+            Found a bug or have a feature idea? Tell us
+          </Text>
+        </TouchableOpacity>
+      </View>
     </SafeAreaView>
   );
 }
@@ -336,24 +378,24 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 24,
+    paddingHorizontal: 20,
     paddingTop: 12,
     paddingBottom: 8,
   },
   title: {
-    fontSize: 32,
+    fontSize: 30,
     fontWeight: "600",
   },
   deviceRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 6,
+    marginTop: 8,
   },
   statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 6,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 8,
   },
   overlay: {
     flex: 1,
@@ -363,14 +405,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   dropdown: {
-    borderRadius: 14,
-    paddingVertical: 8,
+    borderRadius: 18,
+    paddingVertical: 12,
   },
   dropdownItem: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
   },
   leftSlot: {
     flex: 1,

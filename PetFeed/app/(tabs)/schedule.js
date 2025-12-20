@@ -7,6 +7,7 @@ import {
   Pressable,
   ScrollView,
   RefreshControl,
+  Linking,
 } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { useColorScheme } from "react-native";
@@ -15,13 +16,17 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useEffect, useState, useCallback } from "react";
 import { useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import * as Notifications from "expo-notifications";
 
 const STORAGE_KEY = "PETFEED_DEVICES";
 const ACTIVE_DEVICE_KEY = "PETFEED_ACTIVE_DEVICE";
+const NOTIFICATION_ID_KEY = "PETFEED_SCHEDULE_NOTIFICATION_ID";
 
 export default function HomeScreen() {
   const scheme = useColorScheme() ?? "light";
   const colors = Colors[scheme];
+  // PREVIEW ONLY – remove later
+  const PREVIEW_STATUS = false;
 
   const [devices, setDevices] = useState([]);
   const [currentId, setCurrentId] = useState(null);
@@ -33,6 +38,39 @@ export default function HomeScreen() {
 
   // const [showPicker, setShowPicker] = useState(false);
   const [scheduledTime, setScheduledTime] = useState(new Date());
+
+  // Notification helpers
+  async function ensureNotificationPermission() {
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status !== "granted") {
+      const req = await Notifications.requestPermissionsAsync();
+      return req.status === "granted";
+    }
+    return true;
+  }
+
+  async function scheduleFeedNotification(date) {
+    const ok = await ensureNotificationPermission();
+    if (!ok) return;
+
+    const id = await Notifications.scheduleNotificationAsync({
+      content: {
+        title: "PetFeed",
+        body: "Scheduled feed time",
+      },
+      trigger: date,
+    });
+
+    await AsyncStorage.setItem(NOTIFICATION_ID_KEY, id);
+  }
+
+  async function cancelFeedNotification() {
+    const id = await AsyncStorage.getItem(NOTIFICATION_ID_KEY);
+    if (id) {
+      await Notifications.cancelScheduledNotificationAsync(id);
+      await AsyncStorage.removeItem(NOTIFICATION_ID_KEY);
+    }
+  }
 
   async function scheduleFeed() {
     if (!currentDevice || !currentDevice.online) return;
@@ -47,6 +85,17 @@ export default function HomeScreen() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ time: timeStr }),
       });
+      const notifyDate = new Date();
+      notifyDate.setHours(scheduledTime.getHours());
+      notifyDate.setMinutes(scheduledTime.getMinutes());
+      notifyDate.setSeconds(0);
+
+      // If time already passed today, schedule for tomorrow
+      if (notifyDate <= new Date()) {
+        notifyDate.setDate(notifyDate.getDate() + 1);
+      }
+
+      await scheduleFeedNotification(notifyDate);
       await fetchScheduleState();
     } catch (e) {
       console.log("Failed to schedule feed", e);
@@ -60,6 +109,7 @@ export default function HomeScreen() {
       await fetch(`http://${currentDevice.hostname}/CANCEL_SCHEDULE`, {
         method: "POST",
       });
+      await cancelFeedNotification();
       await fetchScheduleState();
     } catch (e) {
       console.log("Failed to cancel schedule", e);
@@ -252,17 +302,28 @@ export default function HomeScreen() {
                 ]}
               />
               <Text
-                style={{ color: colors.textSecondary, fontSize: 14 }}
+                style={{ color: colors.textSecondary, fontSize: 16 }}
                 numberOfLines={1}
               >
                 {currentDevice.name} ·{" "}
                 {currentDevice.online ? "Online" : "Offline"}
               </Text>
+              <Text
+                style={{
+                  marginLeft: 6,
+                  fontSize: 16,
+                  marginBottom: 0,
+                  color: colors.textSecondary,
+                }}
+              >
+                ▾
+              </Text>
             </TouchableOpacity>
           ) : (
-            <Text style={{ color: colors.textSecondary, fontSize: 14 }}>
+            <Text style={{ color: colors.textSecondary, fontSize: 16 }}>
               No device
             </Text>
+            
           )}
         </View>
 
@@ -287,62 +348,54 @@ export default function HomeScreen() {
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        {currentDevice && (
+        {(currentDevice || PREVIEW_STATUS) && (
           <View
-            style={{
-              flexDirection: "column",
-              alignItems: "center",
-              marginBottom: 5,
-            }}
+            style={[
+              styles.combinedStatusPill,
+              scheme === "light" && styles.combinedStatusPillLight,
+            ]}
           >
-            {scheduledLabel && (
-              <View style={{ marginBottom: 8 }}>
-                <Text style={{ color: colors.textSecondary, fontSize: 14 }}>
-                  Currently scheduled for {scheduledLabel}
-                </Text>
-              </View>
-            )}
-            <View style={{ flexDirection: "row", alignItems: "center" }}>
-              <Text style={{ color: colors.textSecondary, marginRight: 12 }}>
-                Lid state: {lidState ? lidState.toLowerCase() : "unknown"}
+            <View style={styles.lidStatusInline}>
+              <View
+                style={[
+                  styles.lidDot,
+                  {
+                    backgroundColor:
+                      lidState === "OPEN"
+                        ? "#34C759"
+                        : lidState === "CLOSED"
+                        ? "#ff3b30"
+                        : "#8e8e93",
+                  },
+                ]}
+              />
+              <Text
+                style={[
+                  styles.lidStateInlineText,
+                  scheme === "light" && styles.lidStateInlineTextLight,
+                ]}
+              >
+                {lidState
+                  ? lidState === "OPEN"
+                    ? "Open"
+                    : "Closed"
+                  : "Unknown"}
               </Text>
-              <TouchableOpacity
-                onPress={() => sendCommand("OPEN")}
-                disabled={!currentDevice.online}
-                style={{
-                  paddingHorizontal: 10,
-                  paddingVertical: 4,
-                  borderRadius: 8,
-                  backgroundColor: "#34C759",
-                  opacity: !currentDevice.online ? 0.4 : 1,
-                  marginRight: 6,
-                }}
-              >
-                <Text
-                  style={{ color: "#000", fontSize: 12, fontWeight: "600" }}
-                >
-                  Open
-                </Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => sendCommand("CLOSE")}
-                disabled={!currentDevice.online}
-                style={{
-                  paddingHorizontal: 10,
-                  paddingVertical: 4,
-                  borderRadius: 8,
-                  borderWidth: 1,
-                  borderColor: "#ff3b30",
-                  opacity: !currentDevice.online ? 0.4 : 1,
-                }}
-              >
-                <Text
-                  style={{ color: "#ff3b30", fontSize: 12, fontWeight: "600" }}
-                >
-                  Close
-                </Text>
-              </TouchableOpacity>
             </View>
+
+            {(scheduledLabel || PREVIEW_STATUS) && (
+              <Text
+                style={[
+                  styles.scheduledInlineText,
+                  scheme === "light" && styles.scheduledInlineTextLight,
+                ]}
+              >
+                Currently scheduled for{" "}
+                <Text style={styles.scheduledInlineTime}>
+                  {PREVIEW_STATUS ? "23:27" : scheduledLabel}
+                </Text>
+              </Text>
+            )}
           </View>
         )}
 
@@ -420,6 +473,38 @@ export default function HomeScreen() {
         </View>
       </ScrollView>
 
+      {/* Feature request / bug report link */}
+      <View
+        style={{
+          position: "absolute",
+          bottom: 90,
+          left: 0,
+          right: 0,
+          alignItems: "center",
+        }}
+      >
+        <TouchableOpacity
+          onPress={async () => {
+            const url =
+              "https://docs.google.com/forms/d/e/1FAIpQLSeK09tSetMjIBSNJGb8ljF9vkiKjq6H_mBQQ83d0lsXaOZrWQ/viewform";
+            const supported = await Linking.canOpenURL(url);
+            if (supported) {
+              await Linking.openURL(url);
+            }
+          }}
+        >
+          <Text
+            style={{
+              fontSize: 13,
+              color: colors.textSecondary,
+              textDecorationLine: "underline",
+            }}
+          >
+            Found a bug or have a feature idea? Tell us
+          </Text>
+        </TouchableOpacity>
+      </View>
+
       {/* Dropdown */}
       <Modal
         visible={dropdownOpen}
@@ -444,7 +529,7 @@ export default function HomeScreen() {
                     { backgroundColor: device.online ? "#3ddc84" : "#777" },
                   ]}
                 />
-                <Text style={{ color: colors.text, flex: 1 }}>
+                <Text style={{ color: colors.text, flex: 1, fontSize: 16 }}>
                   {device.name}
                 </Text>
                 {device.id === currentId && (
@@ -460,27 +545,80 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  statusPreviewWrapper: {
+    width: "100%",
+    maxWidth: 360,
+    alignItems: "center",
+    marginBottom: 20,
+    gap: 12,
+  },
+
+  statusPill: {
+    width: "100%",
+    borderRadius: 20,
+    paddingVertical: 14,
+    alignItems: "center",
+    backgroundColor: "#2c2c2e",
+  },
+
+  statusPillLight: {
+    backgroundColor: "#f2f2f7",
+  },
+
+  statusPillLabel: {
+    fontSize: 11,
+    letterSpacing: 1.2,
+    fontWeight: "600",
+    color: "#8e8e93",
+    marginBottom: 4,
+  },
+
+  statusPillValue: {
+    fontSize: 22,
+    fontWeight: "700",
+    color: "#ffffff",
+  },
+
+  lidStatePillSmall: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: "#2c2c2e",
+  },
+
+  lidStatePillSmallLight: {
+    backgroundColor: "#f2f2f7",
+  },
+
+  lidStateTextSmall: {
+    fontSize: 16,
+    fontWeight: "600",
+    marginLeft: 10,
+    color: "#ffffff",
+  },
   header: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 24,
+    paddingHorizontal: 20,
     paddingTop: 12,
     paddingBottom: 8,
   },
   title: {
-    fontSize: 32,
+    fontSize: 30,
     fontWeight: "600",
   },
   deviceRow: {
     flexDirection: "row",
     alignItems: "center",
-    marginTop: 6,
+    marginTop: 8,
   },
   statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 6,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    marginRight: 8,
   },
   overlay: {
     flex: 1,
@@ -490,14 +628,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
   },
   dropdown: {
-    borderRadius: 14,
-    paddingVertical: 8,
+    borderRadius: 18,
+    paddingVertical: 12,
   },
   dropdownItem: {
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
   },
   leftSlot: {
     flex: 1,
@@ -590,5 +728,71 @@ const styles = StyleSheet.create({
     color: "#ff3b30",
     fontSize: 16,
     fontWeight: "600",
+  },
+  statusLinePill: {
+    width: "100%",
+    borderRadius: 16,
+    paddingVertical: 12,
+    paddingHorizontal: 18,
+    backgroundColor: "#2c2c2e",
+  },
+  statusLinePillLight: {
+    backgroundColor: "#f2f2f7",
+  },
+  statusLineText: {
+    fontSize: 15,
+    fontWeight: "500",
+    color: "#ffffff",
+  },
+  statusLineTime: {
+    fontWeight: "700",
+  },
+
+  // New styles for combined status pill and inline status
+  combinedStatusPill: {
+    width: "100%",
+    maxWidth: 360,
+    borderRadius: 18,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    backgroundColor: "#2c2c2e",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 20,
+  },
+
+  combinedStatusPillLight: {
+    backgroundColor: "#f2f2f7",
+  },
+
+  lidStatusInline: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+
+  lidStateInlineText: {
+    fontSize: 16,
+    fontWeight: "600",
+    color: "#ffffff",
+    marginLeft: 8,
+  },
+
+  lidStateInlineTextLight: {
+    color: "#1c1c1e",
+  },
+
+  scheduledInlineText: {
+    fontSize: 15,
+    fontWeight: "500",
+    color: "#ffffff",
+  },
+
+  scheduledInlineTextLight: {
+    color: "#1c1c1e",
+  },
+
+  scheduledInlineTime: {
+    fontWeight: "700",
   },
 });

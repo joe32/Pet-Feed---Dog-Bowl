@@ -1,12 +1,19 @@
-import { View, Text, TouchableOpacity, StyleSheet, Alert } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, Alert, Linking } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useColorScheme } from "react-native";
 import { Colors } from "../../constants/theme";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import Constants from "expo-constants";
 
 export default function SettingsScreen() {
   const scheme = useColorScheme() ?? "light";
   const colors = Colors[scheme];
+
+  const appVersion =
+    Constants?.expoConfig?.version ||
+    Constants?.manifest?.version ||
+    "1.0.0";
 
   const factoryResetAllDevices = async () => {
     try {
@@ -84,6 +91,30 @@ export default function SettingsScreen() {
       <View style={styles.section}>
         <Text style={[styles.title, { color: colors.text }]}>Settings</Text>
 
+        <TouchableOpacity
+          style={styles.row}
+          onPress={() =>
+            Linking.openURL(
+              "https://docs.google.com/forms/d/e/1FAIpQLSeK09tSetMjIBSNJGb8ljF9vkiKjq6H_mBQQ83d0lsXaOZrWQ/viewform?usp=publish-editor"
+            )
+          }
+        >
+          <Text style={[styles.rowText, { color: colors.text }]}>
+            Feature requests / Bug reports
+          </Text>
+          <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.row}
+          onPress={() => Linking.openURL("https://joescreations.co.uk")}
+        >
+          <Text style={[styles.rowText, { color: colors.text }]}>
+            Purchase a new removable bowl insert
+          </Text>
+          <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+        </TouchableOpacity>
+
         <TouchableOpacity style={styles.row} onPress={confirmClearDevices}>
           <Text style={[styles.rowText, { color: colors.text }]}>
             Clear saved devices
@@ -95,6 +126,15 @@ export default function SettingsScreen() {
             Clear all app data
           </Text>
         </TouchableOpacity>
+
+        <View style={styles.footer}>
+          <Text style={[styles.footerText, { color: colors.textSecondary }]}>
+            PetFeed Home · Version {appVersion}
+          </Text>
+          <Text style={[styles.footerText, { color: colors.textSecondary }]}>
+            © 2025 Joe&apos;s Creations
+          </Text>
+        </View>
       </View>
     </SafeAreaView>
   );
@@ -114,8 +154,19 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "#2c2c2e",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   rowText: {
     fontSize: 16,
+  },
+  footer: {
+    marginTop: 40,
+    alignItems: "center",
+  },
+  footerText: {
+    fontSize: 12,
+    marginTop: 4,
   },
 });
