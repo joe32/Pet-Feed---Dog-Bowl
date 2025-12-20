@@ -26,9 +26,6 @@
 #include <WiFiUdp.h>
 #include <HTTPClient.h>
 
-
-
-
 #define FW_VERSION "1.0.1"
 
 // ================= BLE =================
@@ -83,8 +80,8 @@ void checkLatestRelease() {
     return;
   }
 
-  const char *jsonUrl =
-    "https://raw.githubusercontent.com/joe32/Pet-Feed---Dog-Bowl/main/PetFeed-ESP-Code/Firmware/latest.json";
+  String jsonUrl = String("https://raw.githubusercontent.com/joe32/Pet-Feed---Dog-Bowl/main/PetFeed-ESP-Code/Firmware/latest.json")
+                   + "?t=" + String(millis());
 
   Serial.print("Fetching update info from: ");
   Serial.println(jsonUrl);
