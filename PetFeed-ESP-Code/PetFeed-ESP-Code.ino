@@ -52,6 +52,10 @@ void listDownloadedFirmware() {
 }
 
 bool downloadFirmware(const String &binName) {
+  if (!SPIFFS.exists(FIRMWARE_DIR)) {
+    Serial.println("📁 Firmware dir missing, creating...");
+    SPIFFS.mkdir(FIRMWARE_DIR);
+  }
   String url = String("https://raw.githubusercontent.com/joe32/Pet-Feed---Dog-Bowl/main/PetFeed-ESP-Code/Firmware/")
                + binName + "?t=" + String(millis());
 
