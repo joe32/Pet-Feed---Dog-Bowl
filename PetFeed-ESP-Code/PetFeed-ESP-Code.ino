@@ -25,8 +25,74 @@
 #include <ArduinoOTA.h>
 #include <WiFiUdp.h>
 #include <HTTPClient.h>
+#include <SPIFFS.h>
 
 #define FW_VERSION "1.0.1"
+#define FIRMWARE_DIR "/fw"
+// ================= FIRMWARE SPIFFS HELPERS =================
+void listDownloadedFirmware() {
+  File root = SPIFFS.open(FIRMWARE_DIR);
+  if (!root || !root.isDirectory()) {
+    Serial.println("No firmware directory");
+    return;
+  }
+
+  int index = 1;
+  File file = root.openNextFile();
+  if (!file) {
+    Serial.println("No downloaded firmware found");
+    return;
+  }
+
+  Serial.println("Downloaded firmware:");
+  while (file) {
+    Serial.printf("%d. %s (%d bytes)\n", index++, file.name(), file.size());
+    file = root.openNextFile();
+  }
+}
+
+bool downloadFirmware(const String &binName) {
+  String url = String("https://raw.githubusercontent.com/joe32/Pet-Feed---Dog-Bowl/main/PetFeed-ESP-Code/Firmware/")
+               + binName + "?t=" + String(millis());
+
+  Serial.print("⬇️ Downloading ");
+  Serial.println(url);
+
+  HTTPClient http;
+  http.begin(url);
+  int code = http.GET();
+
+  if (code != HTTP_CODE_OK) {
+    Serial.print("HTTP error: ");
+    Serial.println(code);
+    http.end();
+    return false;
+  }
+
+  File f = SPIFFS.open(String(FIRMWARE_DIR) + "/" + binName, FILE_WRITE);
+  if (!f) {
+    Serial.println("❌ Failed to open file for writing");
+    http.end();
+    return false;
+  }
+
+  WiFiClient *stream = http.getStreamPtr();
+  uint8_t buf[512];
+  int total = 0;
+
+  while (http.connected()) {
+    int len = stream->readBytes(buf, sizeof(buf));
+    if (len <= 0) break;
+    f.write(buf, len);
+    total += len;
+  }
+
+  f.close();
+  http.end();
+
+  Serial.printf("✅ Download complete (%d bytes)\n", total);
+  return true;
+}
 
 // ================= BLE =================
 
@@ -800,6 +866,15 @@ void setup() {
   currentAngle = LID_CLOSED;
   Serial.println("🔒 Lid forced closed on startup");
 
+  if (!SPIFFS.begin(true)) {
+    Serial.println("❌ SPIFFS mount failed");
+  } else {
+    if (!SPIFFS.exists(FIRMWARE_DIR)) {
+      SPIFFS.mkdir(FIRMWARE_DIR);
+    }
+    Serial.println("📁 SPIFFS ready");
+  }
+
   prefs.begin("petfeed", true);
   deviceMode = prefs.getString("mode", "ble");
   wifiSSID = prefs.getString("ssid", "");
@@ -892,13 +967,41 @@ void loop() {
       Serial.print("Firmware version: ");
       Serial.println(FW_VERSION);
     }
+
     if (cmd == "checkupdate") {
       checkLatestRelease();
     }
-    if (cmd == "open")
-      moveLidOpen();
-    if (cmd == "close")
-      moveLidClosed();
+
+    if (cmd == "download") {
+      checkLatestRelease();
+
+      Serial.println("Download latest firmware? (y/n)");
+      while (!Serial.available()) delay(10);
+      String ans = Serial.readStringUntil('\n');
+      ans.trim();
+
+      if (ans == "y" || ans == "Y") {
+        String bin = "PetFeed-v1.0.1.bin";
+        downloadFirmware(bin);
+      } else {
+        Serial.println("❎ Download cancelled");
+      }
+    }
+
+    if (cmd == "install") {
+      listDownloadedFirmware();
+      Serial.println("Type number to install (fake install)");
+      while (!Serial.available()) delay(10);
+      String sel = Serial.readStringUntil('\n');
+      sel.trim();
+
+      Serial.print("Installing firmware option ");
+      Serial.println(sel);
+      Serial.println("⚠️ Fake install only (no OTA yet)");
+    }
+
+    if (cmd == "open") moveLidOpen();
+    if (cmd == "close") moveLidClosed();
     if (cmd == "factory") {
       factoryReset();
       ESP.restart();
