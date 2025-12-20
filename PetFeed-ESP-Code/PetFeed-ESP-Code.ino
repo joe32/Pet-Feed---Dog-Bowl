@@ -24,9 +24,12 @@
 #include <ESPmDNS.h>
 #include <ArduinoOTA.h>
 #include <WiFiUdp.h>
+#include <HTTPClient.h>
 
 
-#define FW_VERSION "1.0.0"
+
+
+#define FW_VERSION "1.0.1"
 
 // ================= BLE =================
 
@@ -72,6 +75,66 @@ bool hasSchedule = false;
 int scheduledHour = -1;
 int scheduledMinute = -1;
 bool scheduleExecutedToday = false;
+
+void checkLatestRelease() {
+  // Make sure WiFi is connected
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi not connected, cannot check updates");
+    return;
+  }
+
+  const char *jsonUrl =
+    "https://raw.githubusercontent.com/joe32/Pet-Feed---Dog-Bowl/main/PetFeed-ESP-Code/Firmware/latest.json";
+
+  Serial.print("Fetching update info from: ");
+  Serial.println(jsonUrl);
+
+  HTTPClient http;
+  http.begin(jsonUrl);
+  int httpCode = http.GET();
+
+  if (httpCode != HTTP_CODE_OK) {
+    Serial.print("HTTP error: ");
+    Serial.println(httpCode);
+    http.end();
+    return;
+  }
+
+  String payload = http.getString();
+  http.end();
+
+  Serial.println("Received JSON:");
+  Serial.println(payload);
+
+  // Parse JSON
+  StaticJsonDocument<256> doc;
+  DeserializationError error = deserializeJson(doc, payload);
+
+  if (error) {
+    Serial.print("JSON parse failed: ");
+    Serial.println(error.c_str());
+    return;
+  }
+
+  const char *latestVersion = doc["version"];
+  const char *binPath = doc["bin"];
+
+  Serial.print("Latest version: ");
+  Serial.println(latestVersion);
+
+  Serial.print("Latest bin file: ");
+  Serial.println(binPath);
+
+  // Compare to your version
+  Serial.print("Current version: ");
+  Serial.println(FW_VERSION);
+
+  if (String(latestVersion) == String(FW_VERSION)) {
+    Serial.println("Already up to date.");
+  } else {
+    Serial.println("Update available!");
+  }
+}
 
 void setUKTimezone() {
   setenv("TZ", "GMT0BST,M3.5.0/1,M10.5.0/2", 1);
@@ -833,7 +896,7 @@ void loop() {
       Serial.println(FW_VERSION);
     }
     if (cmd == "checkupdate") {
-      Serial.print("No updates configured yet");
+      checkLatestRelease();
     }
     if (cmd == "open")
       moveLidOpen();
