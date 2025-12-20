@@ -8,15 +8,26 @@ import {
   ScrollView,
   RefreshControl,
   Linking,
+  Platform,
 } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { useColorScheme } from "react-native";
 import { Colors } from "../../constants/theme";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Notifications from "expo-notifications";
+
+// Match WildPaws notification behaviour (local to this screen)
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+  }),
+});
+
 
 const STORAGE_KEY = "PETFEED_DEVICES";
 const ACTIVE_DEVICE_KEY = "PETFEED_ACTIVE_DEVICE";
@@ -36,9 +47,37 @@ export default function HomeScreen() {
   const [hasScheduledFeed, setHasScheduledFeed] = useState(false);
   const [scheduledLabel, setScheduledLabel] = useState(null);
 
-  // const [showPicker, setShowPicker] = useState(false);
+  const [showPicker, setShowPicker] = useState(false);
   const [scheduledTime, setScheduledTime] = useState(new Date());
+  const androidTempTimeRef = useRef(null);
 
+  // Memoised Android time picker to prevent re-render resets (ANDROID ONLY)
+  const androidTimePicker = useMemo(() => {
+    if (Platform.OS !== "android" || !showPicker) return null;
+
+    return (
+      <DateTimePicker
+        value={androidTempTimeRef.current ?? scheduledTime}
+        mode="time"
+        display="spinner"
+        is24Hour={false}
+        onChange={(event, date) => {
+          if (event.type === "dismissed") {
+            setShowPicker(false);
+            androidTempTimeRef.current = null;
+            return;
+          }
+
+          if (event.type === "set" && date) {
+            setShowPicker(false);
+            androidTempTimeRef.current = null;
+            setScheduledTime(new Date(date.getTime()));
+          }
+        }}
+      />
+    );
+  }, [showPicker]);
+  
   // Notification helpers
   async function ensureNotificationPermission() {
     const { status } = await Notifications.getPermissionsAsync();
@@ -50,18 +89,35 @@ export default function HomeScreen() {
   }
 
   async function scheduleFeedNotification(date) {
-    const ok = await ensureNotificationPermission();
-    if (!ok) return;
+    try {
+      const { status } = await Notifications.getPermissionsAsync();
+      if (status !== "granted") {
+        const req = await Notifications.requestPermissionsAsync();
+        if (req.status !== "granted") return;
+      }
 
-    const id = await Notifications.scheduleNotificationAsync({
-      content: {
-        title: "PetFeed",
-        body: "Scheduled feed time",
-      },
-      trigger: date,
-    });
+      // Harden date exactly like WildPaws-style scheduling
+      const fireDate = new Date(date.getTime());
+      fireDate.setSeconds(0);
+      fireDate.setMilliseconds(0);
 
-    await AsyncStorage.setItem(NOTIFICATION_ID_KEY, id);
+      // Ensure iOS does not silently drop the notification
+      if (fireDate <= new Date(Date.now() + 5000)) {
+        fireDate.setDate(fireDate.getDate() + 1);
+      }
+
+      const id = await Notifications.scheduleNotificationAsync({
+        content: {
+          title: "PetFeed",
+          body: "Scheduled feed time",
+        },
+        trigger: { date: fireDate },
+      });
+
+      await AsyncStorage.setItem(NOTIFICATION_ID_KEY, id);
+    } catch (e) {
+      console.log("Failed to schedule notification", e);
+    }
   }
 
   async function cancelFeedNotification() {
@@ -202,6 +258,7 @@ export default function HomeScreen() {
         devices.map(async (device) => {
           if (!device.hostname) return device;
           const isOnline = await pingDevice(device.hostname);
+          if (device.online === isOnline) return device;
           return { ...device, online: isOnline };
         })
       );
@@ -221,7 +278,7 @@ export default function HomeScreen() {
       }
     }
 
-    interval = setInterval(checkAllDevices, 1000);
+    interval = setInterval(checkAllDevices, 8000);
     checkAllDevices();
 
     return () => clearInterval(interval);
@@ -323,7 +380,6 @@ export default function HomeScreen() {
             <Text style={{ color: colors.textSecondary, fontSize: 16 }}>
               No device
             </Text>
-            
           )}
         </View>
 
@@ -342,7 +398,7 @@ export default function HomeScreen() {
           flexGrow: 1,
           justifyContent: "flex-start",
           alignItems: "center",
-          marginTop: 60,
+          marginTop: 20,
         }}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
@@ -375,7 +431,7 @@ export default function HomeScreen() {
                   scheme === "light" && styles.lidStateInlineTextLight,
                 ]}
               >
-                {lidState
+                Lid State: {lidState
                   ? lidState === "OPEN"
                     ? "Open"
                     : "Closed"
@@ -399,6 +455,43 @@ export default function HomeScreen() {
           </View>
         )}
 
+        {(currentDevice || PREVIEW_STATUS) && (
+          <View style={{ flexDirection: "row", gap: 10, marginBottom: 8 }}>
+            <TouchableOpacity
+              disabled={!currentDevice || !currentDevice.online}
+              onPress={() => sendCommand("OPEN")}
+              style={{
+                paddingVertical: 6,
+                paddingHorizontal: 14,
+                borderRadius: 10,
+                backgroundColor: "#34C759",
+                opacity: !currentDevice || !currentDevice.online ? 0.4 : 1,
+              }}
+            >
+              <Text style={{ fontSize: 13, fontWeight: "600", color: "#000" }}>
+                Open
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              disabled={!currentDevice || !currentDevice.online}
+              onPress={() => sendCommand("CLOSE")}
+              style={{
+                paddingVertical: 6,
+                paddingHorizontal: 14,
+                borderRadius: 10,
+                borderWidth: 1.5,
+                borderColor: "#ff3b30",
+                opacity: !currentDevice || !currentDevice.online ? 0.4 : 1,
+              }}
+            >
+              <Text style={{ fontSize: 13, fontWeight: "600", color: "#ff3b30" }}>
+                Close
+              </Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         <View
           style={[
             styles.scheduleCard,
@@ -409,11 +502,17 @@ export default function HomeScreen() {
             SCHEDULE FEED
           </Text>
 
-          <View
+          <TouchableOpacity
             style={[
               styles.timePill,
               scheme === "light" && styles.timePillLight,
             ]}
+            onPress={() => {
+              if (Platform.OS === "android") {
+                androidTempTimeRef.current = new Date(scheduledTime.getTime());
+                setShowPicker(true);
+              }
+            }}
           >
             <Text style={[styles.timeText, { color: colors.text }]}>
               {scheduledTime.toLocaleTimeString([], {
@@ -421,15 +520,19 @@ export default function HomeScreen() {
                 minute: "2-digit",
               })}
             </Text>
-          </View>
-          <DateTimePicker
-            value={scheduledTime}
-            mode="time"
-            display="spinner"
-            onChange={(event, date) => {
-              if (date) setScheduledTime(date);
-            }}
-          />
+          </TouchableOpacity>
+          {Platform.OS === "ios" && (
+            <DateTimePicker
+              value={scheduledTime}
+              mode="time"
+              display="spinner"
+              onChange={(event, date) => {
+                if (date) setScheduledTime(date);
+              }}
+            />
+          )}
+
+          {Platform.OS === "android" && androidTimePicker}
 
           <View style={styles.scheduleButtons}>
             <TouchableOpacity
@@ -687,7 +790,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 32,
     borderRadius: 999,
     backgroundColor: "#2c2c2e",
-    marginBottom: 40,
+    marginBottom: 20,
   },
   timePillLight: {
     backgroundColor: "#f2f2f7",
@@ -759,7 +862,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 20,
+    marginBottom: 8,
   },
 
   combinedStatusPillLight: {

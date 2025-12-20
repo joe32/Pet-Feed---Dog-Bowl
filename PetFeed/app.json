@@ -1,8 +1,8 @@
 {
   "expo": {
-    "name": "PetFeed Home",
+    "name": "PetFeed",
     "slug": "PetFeed",
-    "version": "1.4.1",
+    "version": "1.4.2",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "petfeed",
