@@ -25,6 +25,9 @@
 #include <ArduinoOTA.h>
 #include <WiFiUdp.h>
 
+
+#define FW_VERSION "1.0.0"
+
 // ================= BLE =================
 
 #define SERVICE_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
@@ -112,7 +115,7 @@ const int buzzerChannel = 7;
 const int buzzerResolution = 8;
 
 // ================= RESET BUTTON =================
-const int resetButtonPin = 7;   // push button to GND
+const int resetButtonPin = 7;  // push button to GND
 bool resetButtonLast = HIGH;
 unsigned long resetButtonPressStart = 0;
 bool resetTriggered = false;
@@ -796,7 +799,7 @@ void loop() {
     if (heldMs >= 5000 && !resetTriggered) {
       Serial.println();
       Serial.println("🚨 RESET ARMING — RELEASE TO CONFIRM");
-      toneOn(2800);   // continuous high‑pitched warning tone
+      toneOn(2800);  // continuous high‑pitched warning tone
       resetTriggered = true;
     }
   }
@@ -825,6 +828,13 @@ void loop() {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim();
 
+    if (cmd == "version") {
+      Serial.print("Firmware version: ");
+      Serial.println(FW_VERSION);
+    }
+    if (cmd == "checkupdate") {
+      Serial.print("No updates configured yet");
+    }
     if (cmd == "open")
       moveLidOpen();
     if (cmd == "close")
