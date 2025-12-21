@@ -1085,6 +1085,16 @@ void startWifiMode()
   // Get auto-update preferences
   server.on("/update-prefs", HTTP_GET, []()
   {
+    Serial.println("📥 HTTP /update-prefs [GET] called");
+    Serial.print("📤 Current autoUpdateEnabled: ");
+    Serial.println(autoUpdateEnabled ? "true" : "false");
+    Serial.print("📤 Current preferred time: ");
+    if (preferredUpdateHour >= 0 && preferredUpdateMinute >= 0) {
+      Serial.printf("%02d:%02d\n", preferredUpdateHour, preferredUpdateMinute);
+    } else {
+      Serial.println("not set");
+    }
+
     StaticJsonDocument<128> doc;
     doc["enabled"] = autoUpdateEnabled;
     if (preferredUpdateHour >= 0 && preferredUpdateMinute >= 0)
@@ -1100,12 +1110,14 @@ void startWifiMode()
 
     String res;
     serializeJson(doc, res);
+    Serial.println("📤 Sending /update-prefs response to app");
     server.send(200, "application/json", res);
   });
 
   // Save auto-update preferences
   server.on("/update-prefs", HTTP_POST, []()
   {
+    Serial.println("📥 HTTP /update-prefs [POST] called");
     if (!server.hasArg("plain"))
     {
       server.send(400, "text/plain", "no body");
@@ -1118,6 +1130,9 @@ void startWifiMode()
       server.send(400, "text/plain", "bad json");
       return;
     }
+
+    Serial.print("📥 Raw JSON body: ");
+    Serial.println(server.arg("plain"));
 
     autoUpdateEnabled = doc["enabled"] | false;
 
@@ -1132,7 +1147,18 @@ void startWifiMode()
       }
     }
 
+    Serial.print("📤 New autoUpdateEnabled: ");
+    Serial.println(autoUpdateEnabled ? "true" : "false");
+
+    Serial.print("📤 New preferred update time: ");
+    if (preferredUpdateHour >= 0 && preferredUpdateMinute >= 0) {
+      Serial.printf("%02d:%02d\n", preferredUpdateHour, preferredUpdateMinute);
+    } else {
+      Serial.println("cleared / not set");
+    }
+
     saveAutoUpdatePrefs();
+    Serial.println("✅ Auto‑update preferences saved and acknowledged to app");
     server.send(200, "application/json", "{\"status\":\"saved\"}");
   });
 
