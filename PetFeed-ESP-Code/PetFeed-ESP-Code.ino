@@ -28,7 +28,7 @@
 #include <HTTPClient.h>
 #include <SPIFFS.h>
 
-#define FW_VERSION "1.2.6"
+#define FW_VERSION "1.2.7"
 #define FIRMWARE_DIR "/fw"
 
 String latestBinName = "";
@@ -1363,7 +1363,15 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks
     {
       Serial.println("📡 BLE WIFISCAN command received");
 
-      int n = WiFi.scanNetworks(/*async=*/false, /*hidden=*/true);
+      // ESP32‑S3 FIX: BLE + Wi‑Fi scan cannot run together
+      BLEDevice::deinit(true);
+      delay(200);
+
+      WiFi.mode(WIFI_STA);
+      int n = WiFi.scanNetworks(false, true);
+
+      BLEDevice::init("PetFeeder");
+      delay(200);
 
       if (n <= 0)
       {
@@ -1384,36 +1392,6 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks
       c->notify();
 
       Serial.print("📤 BLE WIFISCAN response sent: ");
-      Serial.println(result);
-      return;
-    }
-
-    // ================= WIFI SCAN (BLE) =================
-    if (cmd == "WIFISCAN")
-    {
-      Serial.println("📡 BLE requested Wi‑Fi scan");
-
-      int n = WiFi.scanNetworks();
-      if (n <= 0)
-      {
-        c->setValue("WIFISCAN:EMPTY");
-        c->notify();
-        Serial.println("⚠️ No networks found");
-        return;
-      }
-
-      String result = "WIFISCAN:";
-      for (int i = 0; i < n; i++)
-      {
-        result += WiFi.SSID(i);
-        if (i < n - 1)
-          result += ",";
-      }
-
-      c->setValue(result.c_str());
-      c->notify();
-
-      Serial.print("📤 Sent Wi‑Fi list: ");
       Serial.println(result);
       return;
     }

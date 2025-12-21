@@ -292,7 +292,7 @@ export default function UpdatesScreen() {
         contentContainerStyle={styles.container}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
       >
-        <Text style={[styles.title, { color: colors.text }]}>Software Update</Text>
+        <Text style={[styles.title, { color: colors.text }]}>Firmware Update</Text>
 
         <View style={[styles.card, { backgroundColor: colors.card }]}>
           <Text style={[styles.label, { color: colors.textSecondary }]}>CURRENT FIRMWARE</Text>

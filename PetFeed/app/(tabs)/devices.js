@@ -35,21 +35,25 @@ const ACTIVE_DEVICE_KEY = "PETFEED_ACTIVE_DEVICE";
 
 async function pingHost(host) {
   try {
+    console.log("[Devices] Requesting /ping for", host);
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), 2000);
     const res = await fetch(`http://${host}.local/ping`, { signal: controller.signal });
     if (!res.ok) throw new Error();
+    console.log("[Devices] Requesting /version for", host);
     const vRes = await fetch(`http://${host}.local/version`, { signal: controller.signal });
     clearTimeout(t);
     const vJson = await vRes.json();
     return { online: true, firmware: vJson.version };
-  } catch {
-    return { online: false, firmware: undefined };
+  } catch (e) {
+    console.log("[Devices] /ping or /version failed for", host, e?.message || e);
+    return { online: false, firmware: "unavailable" };
   }
 }
 
 // Helper to check update availability for a device
 async function checkUpdateForHost(host) {
+  console.log("[Devices] Requesting /check-update for", host);
   try {
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), 3000);
@@ -59,16 +63,27 @@ async function checkUpdateForHost(host) {
     });
 
     clearTimeout(t);
-    if (!res.ok) return { hasUpdate: false };
+
+    if (!res.ok) {
+      console.log("[Devices] /check-update non-200 for", host);
+      return { status: "unknown" };
+    }
 
     const json = await res.json();
-    // expected: { status: "up-to-date" } OR { status: "available", version: "x.y.z" }
+    console.log("[Devices] /check-update response for", host, json);
+
     if (json.status === "available") {
-      return { hasUpdate: true, version: json.version };
+      return { status: "available", version: json.version };
     }
-    return { hasUpdate: false };
-  } catch {
-    return { hasUpdate: false };
+
+    if (json.status === "up-to-date") {
+      return { status: "up-to-date" };
+    }
+
+    return { status: "unknown" };
+  } catch (e) {
+    console.log("[Devices] /check-update failed for", host, e?.message || e);
+    return { status: "unknown" };
   }
 }
 
@@ -87,6 +102,10 @@ export default function DevicesScreen() {
   const [addingLocalDevice, setAddingLocalDevice] = useState(null);
   const [localDeviceName, setLocalDeviceName] = useState("");
 
+  const [checkingUpdateId, setCheckingUpdateId] = useState(null);
+  const [showUpToDateId, setShowUpToDateId] = useState(null);
+
+
   const loadDevices = useCallback(async () => {
     const saved = await AsyncStorage.getItem(STORAGE_KEY);
     const active = await AsyncStorage.getItem(ACTIVE_DEVICE_KEY);
@@ -97,6 +116,7 @@ export default function DevicesScreen() {
       online: typeof d.online === "boolean" ? d.online : false,
       updateAvailable: false,
       updateVersion: null,
+      updateUnknown: false,
     }));
     setDevices(normalised);
 
@@ -143,7 +163,7 @@ export default function DevicesScreen() {
     } catch {}
   }, []);
 
-  // 🔁 Re-sync active device when returning to this screen
+  // 🔁 Re-sync active device when returning to this screen (NO update check)
   useFocusEffect(
     useCallback(() => {
       (async () => {
@@ -151,33 +171,69 @@ export default function DevicesScreen() {
         if (active) {
           setActiveDeviceId(active);
         }
-
-        // Reset update info before checking
-        setDevices((prev) =>
-          prev.map((d) => ({
-            ...d,
-            updateAvailable: false,
-            updateVersion: null,
-          }))
-        );
-
-        const checked = await Promise.all(
-          devices.map(async (d) => {
-            if (!d.host) return d;
-            const result = await checkUpdateForHost(d.host);
-            return {
-              ...d,
-              updateAvailable: result.hasUpdate,
-              updateVersion: result.version || null,
-            };
-          })
-        );
-
-        setDevices(checked);
-        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(checked));
       })();
-    }, [devices])
+    }, [])
   );
+  // Manual update check for a single device
+  async function runManualUpdateCheck(device) {
+    console.log("[Devices] Manual update check triggered for", device.host);
+    if (!device?.host || checkingUpdateId) return;
+
+    setCheckingUpdateId(device.id);
+    setShowUpToDateId(null);
+
+    const result = await checkUpdateForHost(device.host);
+
+    setCheckingUpdateId(null);
+
+    if (result.status === "available") {
+      setDevices((prev) =>
+        prev.map((d) =>
+          d.id === device.id
+            ? {
+                ...d,
+                updateAvailable: true,
+                updateVersion: result.version,
+                updateUnknown: false,
+              }
+            : d
+        )
+      );
+      return;
+    }
+
+    if (result.status === "up-to-date") {
+      setDevices((prev) =>
+        prev.map((d) =>
+          d.id === device.id
+            ? {
+                ...d,
+                updateAvailable: false,
+                updateVersion: null,
+                updateUnknown: false,
+              }
+            : d
+        )
+      );
+      setShowUpToDateId(device.id);
+      setTimeout(() => setShowUpToDateId(null), 10000);
+      return;
+    }
+
+    // unknown / no response
+    setDevices((prev) =>
+      prev.map((d) =>
+        d.id === device.id
+          ? {
+              ...d,
+              updateAvailable: false,
+              updateVersion: null,
+              updateUnknown: true,
+            }
+          : d
+      )
+    );
+  }
 
   // useFocusEffect(
   //   useCallback(() => {
@@ -223,31 +279,53 @@ export default function DevicesScreen() {
   //   }, [])
   // );
 
+
   useEffect(() => {
-    const id = setInterval(async () => {
-      if (devices.length === 0) return;
+    (async () => {
+      if (!devices.length) return;
+
+      console.log("[Devices] Initial screen load: fetching /ping + /version for all devices");
+
       const updated = await Promise.all(
         devices.map(async (d) => {
           if (!d.host) return d;
+
           const result = await pingHost(d.host);
-          return { ...d, online: result.online, firmware: result.firmware };
+
+          return {
+            ...d,
+            online: result.online,
+            firmware: result.firmware ?? "unavailable",
+          };
         })
       );
+
       setDevices(updated);
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-    }, 5000);
-    return () => clearInterval(id);
-  }, [devices]);
+    })();
+  // run ONLY once on screen mount
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
+
+    console.log("[Devices] Pull-to-refresh: fetching /ping + /version for all devices");
+
     const updated = await Promise.all(
       devices.map(async (d) => {
         if (!d.host) return d;
+
         const result = await pingHost(d.host);
-        return { ...d, online: result.online, firmware: result.firmware };
+
+        return {
+          ...d,
+          online: result.online,
+          firmware: result.firmware ?? "unavailable",
+        };
       })
     );
+
     setDevices(updated);
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
     setRefreshing(false);
@@ -447,6 +525,32 @@ Firmware: ${device.firmware || "Unknown"}`,
               isActive && { borderColor: colors.tint },
             ]}
           >
+            {/* Update available indicator at top-right */}
+            {device.updateAvailable && (
+              <View
+                style={{
+                  position: "absolute",
+                  top: 16,
+                  right: 12,
+                  flexDirection: "row",
+                  alignItems: "center",
+                }}
+              >
+                <View
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: 4,
+                    backgroundColor: "#0A84FF",
+                    marginRight: 4,
+                  }}
+                />
+                <Text style={{ color: "#0A84FF", fontWeight: "700", fontSize: 13 }}>
+                  Update available
+                </Text>
+              </View>
+            )}
+
             <View
               style={[
                 styles.statusDot,
@@ -463,22 +567,7 @@ Firmware: ${device.firmware || "Unknown"}`,
                   {isActive ? "Selected" : "Not selected"} ·{" "}
                   {device.online ? "Online" : "Offline"}
                 </Text>
-                {device.updateAvailable && (
-                  <View style={{ flexDirection: "row", alignItems: "center", marginLeft: 6 }}>
-                    <View
-                      style={{
-                        width: 8,
-                        height: 8,
-                        borderRadius: 4,
-                        backgroundColor: "#0A84FF",
-                        marginRight: 4,
-                      }}
-                    />
-                    <Text style={{ color: "#0A84FF", fontWeight: "700", fontSize: 14 }}>
-                      Update available
-                    </Text>
-                  </View>
-                )}
+                {/* Removed inline update available indicator here */}
               </View>
               <Text
                 style={{
@@ -490,21 +579,67 @@ Firmware: ${device.firmware || "Unknown"}`,
                 Connection:{" "}
                 {device.mode === "local" ? "Local device" : "Wi‑Fi (local)"}
               </Text>
-              {device.updateAvailable && (
-                <TouchableOpacity
-                  onPress={() =>
-                    router.push({
-                      pathname: "/(device-setup)/updates",
-                      params: { host: device.host, name: device.name },
-                    })
-                  }
-                  style={{ marginTop: 6 }}
-                >
+
+              <View style={{ marginTop: 6 }}>
+                {checkingUpdateId === device.id ? (
                   <Text style={{ color: "#0A84FF", fontWeight: "600", fontSize: 13 }}>
-                    Update
+                    Checking for updates…
                   </Text>
-                </TouchableOpacity>
-              )}
+                ) : showUpToDateId === device.id ? (
+                  <Text style={{ color: colors.textSecondary, fontSize: 13 }}>
+                    Already up to date
+                  </Text>
+                ) : device.updateUnknown ? (
+                  <TouchableOpacity onPress={() => runManualUpdateCheck(device)}>
+                    <Text style={{ color: "#FF9F0A", fontSize: 13, fontWeight: "600" }}>
+                      Unable to check updates · Tap to retry
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+
+                {device.updateAvailable && (
+                  <View>
+                    <TouchableOpacity
+                      onPress={() =>
+                        router.push({
+                          pathname: "/(device-setup)/updates",
+                          params: { host: device.host, name: device.name },
+                        })
+                      }
+                      style={{ marginTop: 4 }}
+                    >
+                      <Text style={{ color: "#0A84FF", fontWeight: "600", fontSize: 13 }}>
+                        Update now
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                )}
+
+                {!device.updateAvailable &&
+                  checkingUpdateId !== device.id &&
+                  showUpToDateId !== device.id &&
+                  !device.updateUnknown && (
+                    <TouchableOpacity onPress={() => runManualUpdateCheck(device)}>
+                      <Text style={{ color: "#0A84FF", fontWeight: "600", fontSize: 13 }}>
+                        Check for updates
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+              </View>
+            </View>
+
+            {/* Version label moved to bottom-right */}
+            <View
+              style={{
+                position: "absolute",
+                bottom: 16,
+                right: 12,
+                alignItems: "flex-end",
+              }}
+            >
+              <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+                Version {device.firmware === "unavailable" ? "Unavailable" : device.firmware}
+              </Text>
             </View>
 
             <View style={styles.inlineActions}>
