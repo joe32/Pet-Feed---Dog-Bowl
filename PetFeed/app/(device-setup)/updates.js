@@ -22,6 +22,10 @@ export default function UpdatesScreen() {
 
   const [updateStatus, setUpdateStatus] = useState(null); // { phase, downloadedMb, totalMb }
 
+  const [autoUpdateEnabled, setAutoUpdateEnabled] = useState(false);
+  const [preferredTime, setPreferredTime] = useState(null);
+  const [savingPrefs, setSavingPrefs] = useState(false);
+
   async function fetchVersion() {
     const res = await fetch("/version");
     const text = await res.text();
@@ -55,6 +59,8 @@ export default function UpdatesScreen() {
     setUpdating(true);
     setUpdateStatus({ phase: "starting" });
     await fetch("/update");
+    // Start polling for update status after initiating update
+    pollUpdateStatus();
   }
 
   async function pollUpdateStatus() {
@@ -74,10 +80,33 @@ export default function UpdatesScreen() {
     } catch {}
   }
 
+  async function fetchAutoUpdatePrefs() {
+    try {
+      const res = await fetch("/update-preferences");
+      const json = await res.json();
+      setAutoUpdateEnabled(!!json.enabled);
+      setPreferredTime(json.time ?? null);
+    } catch {}
+  }
+
+  async function saveAutoUpdatePrefs() {
+    setSavingPrefs(true);
+    await fetch("/update-preferences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        enabled: autoUpdateEnabled,
+        time: preferredTime,
+      }),
+    });
+    setSavingPrefs(false);
+  }
+
   async function fullRefresh() {
     setRefreshing(true);
     await fetchVersion();
     await checkForUpdates();
+    await fetchAutoUpdatePrefs();
     setRefreshing(false);
   }
 
@@ -126,10 +155,6 @@ export default function UpdatesScreen() {
                 <TouchableOpacity style={styles.primaryButton} onPress={startUpdate}>
                   <Text style={styles.primaryButtonText}>Update Now</Text>
                 </TouchableOpacity>
-
-                <TouchableOpacity style={[styles.secondaryButton, { opacity: 0.4 }]} disabled>
-                  <Text style={styles.secondaryButtonText}>Schedule Update</Text>
-                </TouchableOpacity>
               </View>
             ) : (
               <TouchableOpacity onPress={checkForUpdates} style={styles.linkButton}>
@@ -176,6 +201,55 @@ export default function UpdatesScreen() {
             )}
           </View>
         )}
+
+        <View style={[styles.card, { backgroundColor: colors.card }]}>
+          <Text style={[styles.updateTitle, { color: colors.text }]}>
+            Automatic Updates
+          </Text>
+
+          <TouchableOpacity
+            onPress={() => setAutoUpdateEnabled(v => !v)}
+            style={{ marginTop: 12, flexDirection: "row", alignItems: "center" }}
+          >
+            <View
+              style={{
+                width: 22,
+                height: 22,
+                borderRadius: 6,
+                borderWidth: 2,
+                borderColor: colors.text,
+                alignItems: "center",
+                justifyContent: "center",
+                marginRight: 10,
+                backgroundColor: autoUpdateEnabled ? "#34C759" : "transparent",
+              }}
+            >
+              {autoUpdateEnabled && (
+                <Text style={{ color: "#fff", fontWeight: "800" }}>✓</Text>
+              )}
+            </View>
+            <Text style={{ color: colors.text }}>Enable automatic updates</Text>
+          </TouchableOpacity>
+
+          {autoUpdateEnabled && (
+            <TouchableOpacity
+              onPress={() => setPreferredTime && setPreferredTime(true)}
+              style={{ marginTop: 12 }}
+            >
+              <Text style={{ color: colors.tint }}>
+                Preferred update time: {preferredTime ?? "Not set"}
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          <TouchableOpacity
+            style={[styles.primaryButton, { marginTop: 16, opacity: savingPrefs ? 0.5 : 1 }]}
+            disabled={savingPrefs}
+            onPress={saveAutoUpdatePrefs}
+          >
+            <Text style={styles.primaryButtonText}>Save</Text>
+          </TouchableOpacity>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );

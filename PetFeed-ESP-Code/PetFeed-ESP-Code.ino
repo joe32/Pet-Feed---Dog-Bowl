@@ -28,7 +28,7 @@
 #include <HTTPClient.h>
 #include <SPIFFS.h>
 
-#define FW_VERSION "1.2.3"
+#define FW_VERSION "1.2.2"
 #define FIRMWARE_DIR "/fw"
 
 String latestBinName = "";
@@ -41,6 +41,7 @@ String otaMessage = "";    // human-readable status
 
 bool otaRequested = false;
 bool otaRunning = false;
+TaskHandle_t otaTaskHandle = nullptr;
 
 // Track SPIFFS mount state (some environments fail if you call begin() in multiple places)
 bool spiffsMounted = false;
@@ -495,6 +496,16 @@ void fullAutoUpdate()
     return;
   }
   installFirmwareFromSPIFFS(foundIndex);
+}
+
+// ===== OTA FreeRTOS Task Wrapper =====
+void otaTask(void *param)
+{
+  otaRunning = true;
+  fullAutoUpdate();
+  otaRunning = false;
+  otaTaskHandle = nullptr;
+  vTaskDelete(NULL);
 }
 // Helper: Find firmware index by name (1-based for installFirmwareFromSPIFFS)
 int findFirmwareIndexByName(const String &binName)
@@ -1042,9 +1053,20 @@ void startWifiMode()
 
   server.on("/update", HTTP_POST, []()
             {
-    otaRequested = true;
-    otaStatus = "checking";
-    otaMessage = "Update requested";
+    if (!otaRunning && otaTaskHandle == nullptr)
+    {
+      otaStatus = "checking";
+      otaMessage = "Update requested";
+      xTaskCreatePinnedToCore(
+        otaTask,
+        "otaTask",
+        8192,
+        NULL,
+        1,
+        &otaTaskHandle,
+        1
+      );
+    }
     server.send(200, "application/json", "{\"status\":\"started\"}");
 });
 
@@ -1574,15 +1596,7 @@ void loop()
   }
 
   // ================= OTA BACKGROUND EXECUTION =================
-  if (otaRequested && !otaRunning)
-  {
-    otaRunning = true;
-    otaRequested = false;
-
-    fullAutoUpdate();
-
-    otaRunning = false;
-  }
+  // (Removed: now handled by FreeRTOS task in response to /update)
 
   // Print time once per minute, exactly at :00 seconds (non-blocking)
   if (deviceMode == "wifi")
