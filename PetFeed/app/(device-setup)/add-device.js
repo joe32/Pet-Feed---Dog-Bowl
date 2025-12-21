@@ -23,6 +23,7 @@ import {
   stopScan,
   connectToDevice,
   sendWifiCredentials,
+  subscribeToBleMessages,
 } from "../ble/bleManager";
 
 // Helper to generate a random hostname
@@ -155,6 +156,31 @@ export default function AddDeviceScreen() {
     } catch (e) {
       console.log("BLE init skipped / not available:", e);
     }
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = subscribeToBleMessages((msg) => {
+      if (typeof msg !== "string") return;
+
+      // Expecting WIFI_SCAN results like: WIFI_SCAN:net1,net2,net3
+      if (msg.startsWith("WIFI_SCAN:")) {
+        console.log("BLE WIFI_SCAN result:", msg);
+
+        const list = msg.replace("WIFI_SCAN:", "").trim();
+        const networks = list
+          .split(",")
+          .map((s) => s.trim())
+          .filter(Boolean);
+
+        setWifiNetworks(networks);
+        setLoadingWifi(false);
+        setWifiTimedOut(false);
+      }
+    });
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+    };
   }, []);
 
   async function beginScan() {

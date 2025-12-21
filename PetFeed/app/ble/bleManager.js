@@ -15,6 +15,20 @@ let scanMode = "default"; // "default" | "claim"
 let connectedDevice = null;
 let connectionListeners = [];
 
+let messageListeners = [];
+let notificationSub = null;
+
+function emitMessage(msg) {
+  messageListeners.forEach((cb) => cb(msg));
+}
+
+export function subscribeToBleMessages(cb) {
+  messageListeners.push(cb);
+  return () => {
+    messageListeners = messageListeners.filter((c) => c !== cb);
+  };
+}
+
 export function getBleManager() {
   if (!manager) {
     manager = new BleManager();
@@ -106,10 +120,45 @@ export async function connectToDevice(deviceId) {
 
   await device.discoverAllServicesAndCharacteristics();
 
+  // Start BLE notifications (for async messages like WIFISCAN results)
+  const serviceUuid =
+    scanMode === "claim" ? CLAIM_SERVICE_UUID : SERVICE_UUID;
+  const charUuid =
+    scanMode === "claim" ? CLAIM_CHARACTERISTIC_UUID : WIFI_CHAR_UUID;
+
+  if (notificationSub) {
+    try {
+      notificationSub.remove();
+    } catch {}
+    notificationSub = null;
+  }
+
+  notificationSub = device.monitorCharacteristicForService(
+    serviceUuid,
+    charUuid,
+    (error, characteristic) => {
+      if (error) return;
+      if (!characteristic?.value) return;
+
+      const decoded = Buffer.from(
+        characteristic.value,
+        "base64"
+      ).toString("utf8");
+
+      emitMessage(decoded);
+    }
+  );
+
   await device.services();
 
   // Monitor disconnects (power off, app close, etc)
   device.onDisconnected(() => {
+    if (notificationSub) {
+      try {
+        notificationSub.remove();
+      } catch {}
+      notificationSub = null;
+    }
     connectedDevice = null;
     notifyConnectionChange();
   });
@@ -125,6 +174,13 @@ export async function disconnectFromDevice() {
 
   const ble = getBleManager();
   const id = connectedDevice.id;
+
+  if (notificationSub) {
+    try {
+      notificationSub.remove();
+    } catch {}
+    notificationSub = null;
+  }
 
   connectedDevice = null;
   notifyConnectionChange();
