@@ -28,19 +28,27 @@
 #include <HTTPClient.h>
 #include <SPIFFS.h>
 
-#define FW_VERSION "1.1.6"
+#define FW_VERSION "1.1.7"
 #define FIRMWARE_DIR "/fw"
 
 String latestBinName = "";
 String latestVersionName = "";
 
+// ===== APP OTA STATUS =====
+String otaStatus = "idle"; // idle | checking | downloading | installing | done | error
+String otaProgress = "";   // e.g. "0.42/1.56 MB"
+String otaMessage = "";    // human-readable status
+
 // Track SPIFFS mount state (some environments fail if you call begin() in multiple places)
 bool spiffsMounted = false;
 
-bool ensureSPIFFS() {
-  if (spiffsMounted) return true;
+bool ensureSPIFFS()
+{
+  if (spiffsMounted)
+    return true;
 
-  if (!SPIFFS.begin(false)) {
+  if (!SPIFFS.begin(false))
+  {
     Serial.println("❌ SPIFFS mount failed");
     spiffsMounted = false;
     return false;
@@ -48,10 +56,12 @@ bool ensureSPIFFS() {
 
   spiffsMounted = true;
 
-  if (!SPIFFS.exists(FIRMWARE_DIR)) {
+  if (!SPIFFS.exists(FIRMWARE_DIR))
+  {
     SPIFFS.mkdir(FIRMWARE_DIR);
   }
-  if (!SPIFFS.exists(FIRMWARE_DIR)) {
+  if (!SPIFFS.exists(FIRMWARE_DIR))
+  {
     Serial.println("❌ Failed to create firmware directory");
     return false;
   }
@@ -59,27 +69,37 @@ bool ensureSPIFFS() {
   return true;
 }
 // Helper: Reopen and rewind firmware directory
-void reopenFirmwareDir(File &root) {
-  if (root) root.close();
+void reopenFirmwareDir(File &root)
+{
+  if (root)
+    root.close();
   root = SPIFFS.open(FIRMWARE_DIR);
-  if (root) root.rewindDirectory();
+  if (root)
+    root.rewindDirectory();
 }
 
 // ======= Firmware file enumerator =======
-int collectFirmwareFiles(std::vector<String> &out) {
+int collectFirmwareFiles(std::vector<String> &out)
+{
   out.clear();
-  if (!ensureSPIFFS()) return 0;
+  if (!ensureSPIFFS())
+    return 0;
 
   File root = SPIFFS.open(FIRMWARE_DIR);
-  if (!root || !root.isDirectory()) {
-    if (root) root.close();
+  if (!root || !root.isDirectory())
+  {
+    if (root)
+      root.close();
     return 0;
   }
   root.rewindDirectory();
-  while (true) {
+  while (true)
+  {
     File f = root.openNextFile();
-    if (!f) break;
-    if (!f.isDirectory()) {
+    if (!f)
+      break;
+    if (!f.isDirectory())
+    {
       String full = String(FIRMWARE_DIR) + "/" + String(f.name()).substring(String(f.name()).lastIndexOf('/') + 1);
       out.push_back(full);
     }
@@ -90,26 +110,32 @@ int collectFirmwareFiles(std::vector<String> &out) {
 }
 
 // ================= FIRMWARE SPIFFS HELPERS =================
-void listDownloadedFirmware() {
-  if (!ensureSPIFFS()) {
+void listDownloadedFirmware()
+{
+  if (!ensureSPIFFS())
+  {
     Serial.println("❌ SPIFFS not mounted");
     return;
   }
   std::vector<String> files;
   int count = collectFirmwareFiles(files);
 
-  if (count == 0) {
+  if (count == 0)
+  {
     Serial.println("No downloaded firmware found");
     return;
   }
 
   Serial.println("Downloaded firmware:");
-  for (int i = 0; i < files.size(); i++) {
+  for (int i = 0; i < files.size(); i++)
+  {
     File f = SPIFFS.open(files[i]);
-    if (!f) continue;
+    if (!f)
+      continue;
 
     String name = files[i];
-    if (name.startsWith(FIRMWARE_DIR "/")) {
+    if (name.startsWith(FIRMWARE_DIR "/"))
+    {
       name.remove(0, strlen(FIRMWARE_DIR) + 1);
     }
 
@@ -120,15 +146,19 @@ void listDownloadedFirmware() {
 }
 
 // ====== FIRMWARE DELETE HELPERS ======
-bool deleteAllFirmware() {
-  if (!ensureSPIFFS()) return false;
+bool deleteAllFirmware()
+{
+  if (!ensureSPIFFS())
+    return false;
   std::vector<String> files;
   int count = collectFirmwareFiles(files);
-  if (count == 0) {
+  if (count == 0)
+  {
     Serial.println("No downloaded firmware found");
     return false;
   }
-  for (auto &p : files) {
+  for (auto &p : files)
+  {
     bool ok = SPIFFS.remove(p);
     Serial.println(ok ? "🗑️ Deleted " + p : "❌ Failed to delete " + p);
   }
@@ -136,15 +166,19 @@ bool deleteAllFirmware() {
   return true;
 }
 
-bool deleteFirmwareByIndex(int targetIndex) {
-  if (!ensureSPIFFS()) return false;
+bool deleteFirmwareByIndex(int targetIndex)
+{
+  if (!ensureSPIFFS())
+    return false;
   std::vector<String> files;
   int count = collectFirmwareFiles(files);
-  if (count == 0) {
+  if (count == 0)
+  {
     Serial.println("No downloaded firmware found");
     return false;
   }
-  if (targetIndex < 1 || targetIndex > files.size()) {
+  if (targetIndex < 1 || targetIndex > files.size())
+  {
     Serial.println("❌ Invalid selection");
     return false;
   }
@@ -155,8 +189,10 @@ bool deleteFirmwareByIndex(int targetIndex) {
 }
 
 // ==== Install firmware from SPIFFS (OTA) ====
-bool installFirmwareFromSPIFFS(int targetIndex) {
-  if (!ensureSPIFFS()) {
+bool installFirmwareFromSPIFFS(int targetIndex)
+{
+  if (!ensureSPIFFS())
+  {
     Serial.println("❌ SPIFFS not mounted");
     return false;
   }
@@ -164,19 +200,22 @@ bool installFirmwareFromSPIFFS(int targetIndex) {
   std::vector<String> files;
   int count = collectFirmwareFiles(files);
 
-  if (count == 0) {
+  if (count == 0)
+  {
     Serial.println("No downloaded firmware found");
     return false;
   }
 
-  if (targetIndex < 1 || targetIndex > files.size()) {
+  if (targetIndex < 1 || targetIndex > files.size())
+  {
     Serial.println("❌ Invalid selection");
     return false;
   }
 
   String path = files[targetIndex - 1];
   File file = SPIFFS.open(path);
-  if (!file) {
+  if (!file)
+  {
     Serial.println("❌ Failed to open firmware file");
     return false;
   }
@@ -184,21 +223,33 @@ bool installFirmwareFromSPIFFS(int targetIndex) {
   size_t size = file.size();
   Serial.printf("🚀 Installing firmware (%d bytes)\n", size);
 
-  if (!Update.begin(size)) {
+  otaStatus = "installing";
+  otaProgress = "";
+  otaMessage = "Installing firmware";
+
+  if (!Update.begin(size))
+  {
     Serial.println("❌ Update begin failed");
     file.close();
+    otaStatus = "error";
+    otaMessage = "Install failed";
     return false;
   }
 
   Update.writeStream(file);
   file.close();
 
-  if (!Update.end(true)) {
+  if (!Update.end(true))
+  {
     Serial.print("❌ Update failed: ");
     Serial.println(Update.errorString());
+    otaStatus = "error";
+    otaMessage = "Install failed";
     return false;
   }
 
+  otaStatus = "done";
+  otaMessage = "Install complete, rebooting";
   Serial.println("✅ Firmware installed successfully");
   Serial.println("🔁 Rebooting...");
   delay(500);
@@ -206,24 +257,27 @@ bool installFirmwareFromSPIFFS(int targetIndex) {
   return true;
 }
 
-bool downloadFirmware(const String &binName) {
-  if (!ensureSPIFFS()) {
+bool downloadFirmware(const String &binName)
+{
+  if (!ensureSPIFFS())
+  {
     Serial.println("❌ SPIFFS not mounted");
     return false;
   }
 
-  if (!SPIFFS.exists(FIRMWARE_DIR)) {
+  if (!SPIFFS.exists(FIRMWARE_DIR))
+  {
     SPIFFS.mkdir(FIRMWARE_DIR);
   }
 
   String cleanName = binName;
-  if (cleanName.startsWith("/")) cleanName.remove(0, 1);
+  if (cleanName.startsWith("/"))
+    cleanName.remove(0, 1);
 
   String localPath = String(FIRMWARE_DIR) + "/" + cleanName;
 
   String url =
-    String("https://raw.githubusercontent.com/joe32/Pet-Feed---Dog-Bowl/main/PetFeed-ESP-Code/Firmware/")
-    + cleanName;
+      String("https://raw.githubusercontent.com/joe32/Pet-Feed---Dog-Bowl/main/PetFeed-ESP-Code/Firmware/") + cleanName;
 
   Serial.print("⬇️ Downloading ");
   Serial.println(url);
@@ -234,7 +288,8 @@ bool downloadFirmware(const String &binName) {
   int totalSize = http.getSize(); // bytes, may be -1 if unknown
   unsigned long lastPrintMs = 0;
 
-  if (code != HTTP_CODE_OK) {
+  if (code != HTTP_CODE_OK)
+  {
     Serial.print("❌ HTTP error: ");
     Serial.println(code);
     http.end();
@@ -242,7 +297,8 @@ bool downloadFirmware(const String &binName) {
   }
 
   File f = SPIFFS.open(localPath, FILE_WRITE);
-  if (!f) {
+  if (!f)
+  {
     Serial.println("❌ Failed to open file for writing");
     http.end();
     return false;
@@ -252,20 +308,30 @@ bool downloadFirmware(const String &binName) {
   uint8_t buffer[1024];
   int total = 0;
 
-  while (http.connected()) {
+  while (http.connected())
+  {
     int len = stream->readBytes(buffer, sizeof(buffer));
-    if (len <= 0) break;
+    if (len <= 0)
+      break;
     f.write(buffer, len);
     total += len;
-    if (millis() - lastPrintMs >= 500) {
+    if (millis() - lastPrintMs >= 500)
+    {
       lastPrintMs = millis();
       float doneMB = total / (1024.0f * 1024.0f);
-      if (totalSize > 0) {
+      if (totalSize > 0)
+      {
         float totalMB = totalSize / (1024.0f * 1024.0f);
         Serial.printf("⬇️ %.2f / %.2f MB\n", doneMB, totalMB);
-      } else {
-        Serial.printf("⬇️ %.2f MB\n", doneMB);
+        otaProgress = String(doneMB, 2) + "/" + String(totalMB, 2) + " MB";
       }
+      else
+      {
+        Serial.printf("⬇️ %.2f MB\n", doneMB);
+        otaProgress = String(doneMB, 2) + " MB";
+      }
+      otaStatus = "downloading";
+      otaMessage = "Downloading firmware";
     }
   }
 
@@ -321,15 +387,16 @@ int scheduledHour = -1;
 int scheduledMinute = -1;
 bool scheduleExecutedToday = false;
 
-void checkLatestRelease() {
+void checkLatestRelease()
+{
   // Make sure WiFi is connected
-  if (WiFi.status() != WL_CONNECTED) {
+  if (WiFi.status() != WL_CONNECTED)
+  {
     Serial.println("WiFi not connected, cannot check updates");
     return;
   }
 
-  String jsonUrl = String("https://raw.githubusercontent.com/joe32/Pet-Feed---Dog-Bowl/main/PetFeed-ESP-Code/Firmware/latest.json")
-                   + "?t=" + String(millis());
+  String jsonUrl = String("https://raw.githubusercontent.com/joe32/Pet-Feed---Dog-Bowl/main/PetFeed-ESP-Code/Firmware/latest.json") + "?t=" + String(millis());
 
   Serial.print("Fetching update info from: ");
   Serial.println(jsonUrl);
@@ -338,7 +405,8 @@ void checkLatestRelease() {
   http.begin(jsonUrl);
   int httpCode = http.GET();
 
-  if (httpCode != HTTP_CODE_OK) {
+  if (httpCode != HTTP_CODE_OK)
+  {
     Serial.print("HTTP error: ");
     Serial.println(httpCode);
     http.end();
@@ -355,7 +423,8 @@ void checkLatestRelease() {
   StaticJsonDocument<256> doc;
   DeserializationError error = deserializeJson(doc, payload);
 
-  if (error) {
+  if (error)
+  {
     Serial.print("JSON parse failed: ");
     Serial.println(error.c_str());
     return;
@@ -374,23 +443,29 @@ void checkLatestRelease() {
   Serial.print("Current version: ");
   Serial.println(FW_VERSION);
 
-  if (latestVersionName == String(FW_VERSION)) {
+  if (latestVersionName == String(FW_VERSION))
+  {
     Serial.println("Already up to date.");
-  } else {
+  }
+  else
+  {
     Serial.println("Update available!");
   }
 }
 
-void fullAutoUpdate() {
+void fullAutoUpdate()
+{
   Serial.println("🔎 Checking for latest firmware...");
   checkLatestRelease();
 
-  if (latestBinName.length() == 0) {
+  if (latestBinName.length() == 0)
+  {
     Serial.println("❌ No update info available");
     return;
   }
 
-  if (latestVersionName == String(FW_VERSION)) {
+  if (latestVersionName == String(FW_VERSION))
+  {
     Serial.println("✅ Already on latest firmware");
     return;
   }
@@ -401,75 +476,92 @@ void fullAutoUpdate() {
   Serial.print("⬇️ Downloading ");
   Serial.println(downloadedBin);
 
-  if (!downloadFirmware(downloadedBin)) {
+  if (!downloadFirmware(downloadedBin))
+  {
     Serial.println("❌ Download failed");
     return;
   }
 
   // Find the index of the downloaded firmware
   int foundIndex = findFirmwareIndexByName(downloadedBin);
-  if (foundIndex == -1) {
+  if (foundIndex == -1)
+  {
     Serial.println("❌ Downloaded firmware file not found in SPIFFS");
     return;
   }
   installFirmwareFromSPIFFS(foundIndex);
 }
 // Helper: Find firmware index by name (1-based for installFirmwareFromSPIFFS)
-int findFirmwareIndexByName(const String &binName) {
+int findFirmwareIndexByName(const String &binName)
+{
   std::vector<String> files;
   int count = collectFirmwareFiles(files);
-  if (count == 0) return -1;
+  if (count == 0)
+    return -1;
 
-  for (int i = 0; i < files.size(); i++) {
-    if (files[i].endsWith(binName)) {
+  for (int i = 0; i < files.size(); i++)
+  {
+    if (files[i].endsWith(binName))
+    {
       return i + 1; // installFirmwareFromSPIFFS is 1-based
     }
   }
   return -1;
 }
 // Helper: Remove all firmware except current version
-void cleanupFirmwareExceptCurrent() {
-  if (!ensureSPIFFS()) return;
+void cleanupFirmwareExceptCurrent()
+{
+  if (!ensureSPIFFS())
+    return;
 
   std::vector<String> files;
   int count = collectFirmwareFiles(files);
-  if (count == 0) return;
+  if (count == 0)
+    return;
 
-  for (auto &path : files) {
+  for (auto &path : files)
+  {
     String name = path;
-    if (name.startsWith(FIRMWARE_DIR "/")) {
+    if (name.startsWith(FIRMWARE_DIR "/"))
+    {
       name.remove(0, strlen(FIRMWARE_DIR) + 1);
     }
 
-    if (!name.endsWith(String(FW_VERSION) + ".bin")) {
+    if (!name.endsWith(String(FW_VERSION) + ".bin"))
+    {
       SPIFFS.remove(path);
       Serial.println("🧹 Removed old firmware: " + name);
     }
   }
 }
 
-void setUKTimezone() {
+void setUKTimezone()
+{
   setenv("TZ", "GMT0BST,M3.5.0/1,M10.5.0/2", 1);
   tzset();
 }
 
-void performWifiScan(bool verboseSerial) {
+void performWifiScan(bool verboseSerial)
+{
   Serial.println("📡 Starting Wi‑Fi scan");
   int n = WiFi.scanNetworks(/*async=*/false, /*hidden=*/true);
   lastWifiScanResult = "";
 
-  if (n <= 0) {
+  if (n <= 0)
+  {
     Serial.println("⚠️ No Wi‑Fi networks found");
     return;
   }
 
-  for (int i = 0; i < n; i++) {
+  for (int i = 0; i < n; i++)
+  {
     lastWifiScanResult += WiFi.SSID(i);
     if (i < n - 1)
       lastWifiScanResult += ",";
   }
 
-  if (verboseSerial) {
+  if (verboseSerial)
+  {
     Serial.print("📶 Networks found: ");
     Serial.println(lastWifiScanResult);
   }
@@ -477,7 +569,7 @@ void performWifiScan(bool verboseSerial) {
 
 // ================= SERVO =================
 Servo myServo;
-const int servoPin = 6;  // KEEP GPIO 6
+const int servoPin = 6; // KEEP GPIO 6
 const int LID_OPEN = 0;
 const int LID_CLOSED = 120;
 
@@ -490,40 +582,47 @@ const int buzzerChannel = 7;
 const int buzzerResolution = 8;
 
 // ================= RESET BUTTON =================
-const int resetButtonPin = 7;  // push button to GND
+const int resetButtonPin = 7; // push button to GND
 bool resetButtonLast = HIGH;
 unsigned long resetButtonPressStart = 0;
 bool resetTriggered = false;
 
-void toneOn(int freq) {
+void toneOn(int freq)
+{
   ledcWriteTone(buzzerChannel, freq);
   // Force maximum duty cycle for loudest possible output
   ledcWrite(buzzerChannel, 255);
 }
 
-void toneOff() {
+void toneOff()
+{
   ledcWriteTone(buzzerChannel, 0);
 }
 
-void beep(int freq, int durationMs) {
+void beep(int freq, int durationMs)
+{
   toneOn(freq);
   delay(durationMs);
   toneOff();
 }
 
-void clickBeep() {
+void clickBeep()
+{
   beep(1800, 40);
 }
 
-void confirmBeep() {
+void confirmBeep()
+{
   beep(1200, 120);
   delay(80);
   beep(1600, 160);
 }
 
-void scheduledFeedBeep() {
+void scheduledFeedBeep()
+{
   // Long repeating tone to alert a scheduled feed
-  for (int i = 0; i < 6; i++) {
+  for (int i = 0; i < 6; i++)
+  {
     toneOn(1400);
     delay(350);
     toneOff();
@@ -532,7 +631,8 @@ void scheduledFeedBeep() {
 }
 
 // ================= HELPER: NOTIFY LID STATE =================
-void notifyLidState() {
+void notifyLidState()
+{
   if (!pCharacteristic)
     return;
 
@@ -545,7 +645,8 @@ void notifyLidState() {
 }
 
 // ================= HELPER: SAVE/LOAD SCHEDULE =================
-void saveSchedule() {
+void saveSchedule()
+{
   prefs.begin("petfeed", false);
   prefs.putBool("hasSchedule", hasSchedule);
   prefs.putInt("schHour", scheduledHour);
@@ -553,7 +654,8 @@ void saveSchedule() {
   prefs.end();
 }
 
-void loadSchedule() {
+void loadSchedule()
+{
   prefs.begin("petfeed", true);
   hasSchedule = prefs.getBool("hasSchedule", false);
   scheduledHour = prefs.getInt("schHour", -1);
@@ -562,12 +664,14 @@ void loadSchedule() {
 }
 
 // ================= HELPER: NOTIFY SCHEDULE =================
-void notifySchedule() {
+void notifySchedule()
+{
   // NOTE: BLE notification only; app now relies on HTTP GETSCHEDULE
   if (!pCharacteristic)
     return;
 
-  if (!hasSchedule) {
+  if (!hasSchedule)
+  {
     pCharacteristic->setValue("SCHEDULE:NONE");
     pCharacteristic->notify();
     Serial.println("📤 Sent schedule: NONE");
@@ -584,17 +688,23 @@ void notifySchedule() {
 }
 
 // ================= SERVO MOTION =================
-void servoWriteSmooth(int targetAngle) {
+void servoWriteSmooth(int targetAngle)
+{
   if (targetAngle == currentAngle)
     return;
 
-  if (targetAngle < currentAngle) {
-    for (int i = currentAngle; i >= targetAngle; i--) {
+  if (targetAngle < currentAngle)
+  {
+    for (int i = currentAngle; i >= targetAngle; i--)
+    {
       myServo.write(i);
       delay(5);
     }
-  } else {
-    for (int i = currentAngle; i <= targetAngle; i++) {
+  }
+  else
+  {
+    for (int i = currentAngle; i <= targetAngle; i++)
+    {
       myServo.write(i);
       delay(5);
     }
@@ -602,7 +712,8 @@ void servoWriteSmooth(int targetAngle) {
   currentAngle = targetAngle;
 }
 
-void moveLidOpen() {
+void moveLidOpen()
+{
   if (lidIsOpen)
     return;
   Serial.println("🔓 OPEN");
@@ -615,7 +726,8 @@ void moveLidOpen() {
   notifyLidState();
 }
 
-void moveLidClosed() {
+void moveLidClosed()
+{
   if (!lidIsOpen)
     return;
   Serial.println("🔒 CLOSE");
@@ -629,7 +741,8 @@ void moveLidClosed() {
 }
 
 // ================= FACTORY RESET =================
-void factoryReset() {
+void factoryReset()
+{
   Serial.println("🧨 FACTORY RESET");
 
   prefs.begin("petfeed", false);
@@ -652,8 +765,10 @@ void factoryReset() {
 // ================= WIFI MODE =================
 
 // ===== CLAIM BLE CALLBACK =====
-class ClaimCharacteristicCallbacks : public BLECharacteristicCallbacks {
-  void onWrite(BLECharacteristic *c) override {
+class ClaimCharacteristicCallbacks : public BLECharacteristicCallbacks
+{
+  void onWrite(BLECharacteristic *c) override
+  {
     String cmd = String(c->getValue().c_str());
     cmd.trim();
 
@@ -661,7 +776,8 @@ class ClaimCharacteristicCallbacks : public BLECharacteristicCallbacks {
     Serial.print(cmd);
     Serial.println("'");
 
-    if (cmd == "CLAIM") {
+    if (cmd == "CLAIM")
+    {
       String host = mdnsHost.length() ? mdnsHost : "petfeeder";
       String reply = "HOST:" + host;
 
@@ -674,17 +790,21 @@ class ClaimCharacteristicCallbacks : public BLECharacteristicCallbacks {
   }
 };
 
-class ClaimServerCallbacks : public BLEServerCallbacks {
-  void onConnect(BLEServer *) override {
+class ClaimServerCallbacks : public BLEServerCallbacks
+{
+  void onConnect(BLEServer *) override
+  {
     Serial.println("📱 CLAIM BLE connected");
   }
 
-  void onDisconnect(BLEServer *) override {
+  void onDisconnect(BLEServer *) override
+  {
     Serial.println("📴 CLAIM BLE disconnected — restarting advertising");
     BLEDevice::startAdvertising();
   }
 };
-void startWifiMode() {
+void startWifiMode()
+{
   Serial.println("📡 Wi-Fi mode");
 
   // ===== BLE DISABLED IN WIFI MODE =====
@@ -726,13 +846,15 @@ void startWifiMode() {
   WiFi.begin(wifiSSID.c_str(), wifiPASS.c_str());
 
   unsigned long start = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - start < 15000) {
+  while (WiFi.status() != WL_CONNECTED && millis() - start < 15000)
+  {
     delay(500);
     Serial.print(".");
   }
   Serial.println();
 
-  if (WiFi.status() != WL_CONNECTED) {
+  if (WiFi.status() != WL_CONNECTED)
+  {
     Serial.println("❌ Wi-Fi failed");
     factoryReset();
     ESP.restart();
@@ -742,20 +864,23 @@ void startWifiMode() {
   Serial.print("✅ IP: ");
   Serial.println(WiFi.localIP());
 
-
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
   delay(1500);
   setUKTimezone();
 
-  if (mdnsHost.length()) {
+  if (mdnsHost.length())
+  {
     Serial.print("🔧 Starting mDNS with hostname: ");
     Serial.println(mdnsHost);
 
-    if (MDNS.begin(mdnsHost.c_str())) {
+    if (MDNS.begin(mdnsHost.c_str()))
+    {
       Serial.print("🌐 mDNS started successfully: ");
       Serial.print(mdnsHost);
       Serial.println(".local");
-    } else {
+    }
+    else
+    {
       Serial.println("❌ mDNS failed to start");
     }
   }
@@ -769,34 +894,34 @@ void startWifiMode() {
   ArduinoOTA.setMdnsEnabled(true);
 
   // Keep OTA hostname aligned with the app's hostname when provided
-  if (mdnsHost.length()) {
+  if (mdnsHost.length())
+  {
     ArduinoOTA.setHostname(mdnsHost.c_str());
-  } else {
+  }
+  else
+  {
     ArduinoOTA.setHostname("petfeeder");
   }
   ArduinoOTA.setPassword("ota");
 
-  ArduinoOTA.onStart([]() {
-    Serial.println("🔁 OTA update start");
-  });
+  ArduinoOTA.onStart([]()
+                     { Serial.println("🔁 OTA update start"); });
 
-  ArduinoOTA.onEnd([]() {
-    Serial.println("✅ OTA update complete");
-  });
+  ArduinoOTA.onEnd([]()
+                   { Serial.println("✅ OTA update complete"); });
 
-  ArduinoOTA.onError([](ota_error_t error) {
-    Serial.printf("❌ OTA error[%u]\n", error);
-  });
+  ArduinoOTA.onError([](ota_error_t error)
+                     { Serial.printf("❌ OTA error[%u]\n", error); });
 
   ArduinoOTA.begin();
   Serial.println("📡 OTA ready");
 
-  server.on("/ping", []() {
-    server.send(200, "application/json", "{\"type\":\"petfeed\"}");
-  });
+  server.on("/ping", []()
+            { server.send(200, "application/json", "{\"type\":\"petfeed\"}"); });
 
   // ================= WIFI SCAN (APP) =================
-  server.on("/WIFISCAN", HTTP_GET, []() {
+  server.on("/WIFISCAN", HTTP_GET, []()
+            {
     Serial.println("📥 HTTP /WIFISCAN called");
 
     performWifiScan(false);
@@ -819,10 +944,10 @@ void startWifiMode() {
 
     String res;
     serializeJson(doc, res);
-    server.send(200, "application/json", res);
-  });
+    server.send(200, "application/json", res); });
 
-  server.on("/command", HTTP_POST, []() {
+  server.on("/command", HTTP_POST, []()
+            {
     if (!server.hasArg("plain")) {
       server.send(400, "text/plain", "no body");
       return;
@@ -836,28 +961,76 @@ void startWifiMode() {
     if (cmd == "OPEN") moveLidOpen();
     if (cmd == "CLOSE") moveLidClosed();
 
-    server.send(200, "application/json", "{\"status\":\"ok\"}");
-  });
+    server.send(200, "application/json", "{\"status\":\"ok\"}"); });
 
-  server.on("/factory-reset", HTTP_POST, []() {
+  server.on("/factory-reset", HTTP_POST, []()
+            {
     server.send(200, "text/plain", "resetting");
     delay(200);
     factoryReset();
-    ESP.restart();
-  });
+    ESP.restart(); });
 
   // ================= GET LID STATE (APP) =================
-  server.on("/GETSTATE", HTTP_GET, []() {
+  server.on("/GETSTATE", HTTP_GET, []()
+            {
     StaticJsonDocument<64> doc;
     doc["state"] = lidIsOpen ? "OPEN" : "CLOSED";
 
     String res;
     serializeJson(doc, res);
-    server.send(200, "application/json", res);
-  });
+    server.send(200, "application/json", res); });
+
+  // ================= OTA UPDATES(APP) =================
+
+  server.on("/version", HTTP_GET, []()
+            {
+    StaticJsonDocument<64> doc;
+    doc["version"] = FW_VERSION;
+    String res;
+    serializeJson(doc, res);
+    server.send(200, "application/json", res); });
+
+  server.on("/check-update", HTTP_GET, []()
+            {
+    checkLatestRelease();
+
+    StaticJsonDocument<128> doc;
+    if (latestVersionName.length() == 0) {
+      doc["status"] = "error";
+    } else if (latestVersionName == String(FW_VERSION)) {
+      doc["status"] = "up-to-date";
+      doc["version"] = FW_VERSION;
+    } else {
+      doc["status"] = "update-available";
+      doc["current"] = FW_VERSION;
+      doc["latest"] = latestVersionName;
+      doc["bin"] = latestBinName;
+    }
+
+    String res;
+    serializeJson(doc, res);
+    server.send(200, "application/json", res); });
+
+  server.on("/update", HTTP_POST, []()
+            {
+    server.send(200, "application/json", "{\"status\":\"started\"}");
+    delay(200);
+    fullAutoUpdate(); });
+
+  server.on("/update-status", HTTP_GET, []()
+            {
+    StaticJsonDocument<128> doc;
+    doc["status"] = otaStatus;
+    doc["progress"] = otaProgress;
+    doc["message"] = otaMessage;
+
+    String res;
+    serializeJson(doc, res);
+    server.send(200, "application/json", res); });
 
   // ================= UPDATE WIFI (APP) =================
-  server.on("/update-wifi", HTTP_POST, []() {
+  server.on("/update-wifi", HTTP_POST, []()
+            {
     if (!server.hasArg("plain")) {
       server.send(400, "text/plain", "no body");
       return;
@@ -895,38 +1068,40 @@ void startWifiMode() {
     Serial.println("🔁 Rebooting to apply new Wi‑Fi...");
     Serial.flush();
     delay(800);
-    ESP.restart();
-  });
+    ESP.restart(); });
 
   // ================= GET SCHEDULE (APP) =================
-  server.on("/GETSCHEDULE", HTTP_GET, []() {
-    StaticJsonDocument<128> doc;
+  server.on("/GETSCHEDULE", HTTP_GET, []()
+            {
+              StaticJsonDocument<128> doc;
 
-    if (!hasSchedule) {
-      doc["hasSchedule"] = false;
-      String res;
-      serializeJson(doc, res);
-      server.send(200, "application/json", res);
-      // Serial.println("📤 GETSCHEDULE → NONE");
-      return;
-    }
+              if (!hasSchedule)
+              {
+                doc["hasSchedule"] = false;
+                String res;
+                serializeJson(doc, res);
+                server.send(200, "application/json", res);
+                // Serial.println("📤 GETSCHEDULE → NONE");
+                return;
+              }
 
-    doc["hasSchedule"] = true;
-    doc["hour"] = scheduledHour;
-    doc["minute"] = scheduledMinute;
+              doc["hasSchedule"] = true;
+              doc["hour"] = scheduledHour;
+              doc["minute"] = scheduledMinute;
 
-    String res;
-    serializeJson(doc, res);
-    server.send(200, "application/json", res);
+              String res;
+              serializeJson(doc, res);
+              server.send(200, "application/json", res);
 
-    // Serial.print("📤 GETSCHEDULE → ");
-    // Serial.print(scheduledHour);
-    // Serial.print(":");
-    // Serial.println(scheduledMinute);
-  });
+              // Serial.print("📤 GETSCHEDULE → ");
+              // Serial.print(scheduledHour);
+              // Serial.print(":");
+              // Serial.println(scheduledMinute);
+            });
 
   // ================= SCHEDULE HTTP ROUTES =================
-  server.on("/SCHEDULE", HTTP_POST, []() {
+  server.on("/SCHEDULE", HTTP_POST, []()
+            {
     Serial.println("📥 HTTP /SCHEDULE called");
     if (!server.hasArg("plain")) {
       server.send(400, "text/plain", "no body");
@@ -954,10 +1129,10 @@ void startWifiMode() {
     notifySchedule();
     confirmBeep();
     Serial.println("✅ Schedule saved successfully");
-    server.send(200, "application/json", "{\"status\":\"scheduled\"}");
-  });
+    server.send(200, "application/json", "{\"status\":\"scheduled\"}"); });
 
-  server.on("/CANCEL_SCHEDULE", HTTP_POST, []() {
+  server.on("/CANCEL_SCHEDULE", HTTP_POST, []()
+            {
     Serial.println("📥 HTTP /CANCEL_SCHEDULE called");
     hasSchedule = false;
     scheduledHour = -1;
@@ -967,27 +1142,31 @@ void startWifiMode() {
     notifySchedule();
     beep(900, 120);
     Serial.println("🗑️ Schedule cancelled");
-    server.send(200, "application/json", "{\"status\":\"cancelled\"}");
-  });
+    server.send(200, "application/json", "{\"status\":\"cancelled\"}"); });
 
   server.begin();
 }
 
 // ================= BLE CALLBACKS =================
-class ServerCallbacks : public BLEServerCallbacks {
-  void onConnect(BLEServer *) override {
+class ServerCallbacks : public BLEServerCallbacks
+{
+  void onConnect(BLEServer *) override
+  {
     deviceConnected = true;
     Serial.println("📱 BLE connected");
   }
-  void onDisconnect(BLEServer *) override {
+  void onDisconnect(BLEServer *) override
+  {
     deviceConnected = false;
     Serial.println("📴 BLE disconnected");
     BLEDevice::startAdvertising();
   }
 };
 
-class CharacteristicCallbacks : public BLECharacteristicCallbacks {
-  void onWrite(BLECharacteristic *c) override {
+class CharacteristicCallbacks : public BLECharacteristicCallbacks
+{
+  void onWrite(BLECharacteristic *c) override
+  {
     Serial.print("📨 BLE raw payload: ");
     Serial.println(c->getValue().c_str());
 
@@ -996,11 +1175,13 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks {
     cmd.trim();
 
     // ================= WIFI SCAN (BLE) =================
-    if (cmd == "WIFISCAN") {
+    if (cmd == "WIFISCAN")
+    {
       Serial.println("📡 BLE requested Wi‑Fi scan");
 
       int n = WiFi.scanNetworks();
-      if (n <= 0) {
+      if (n <= 0)
+      {
         c->setValue("WIFISCAN:EMPTY");
         c->notify();
         Serial.println("⚠️ No networks found");
@@ -1008,7 +1189,8 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks {
       }
 
       String result = "WIFISCAN:";
-      for (int i = 0; i < n; i++) {
+      for (int i = 0; i < n; i++)
+      {
         result += WiFi.SSID(i);
         if (i < n - 1)
           result += ",";
@@ -1022,7 +1204,8 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks {
       return;
     }
 
-    if (!cmd.startsWith("WIFI:")) {
+    if (!cmd.startsWith("WIFI:"))
+    {
       return;
     }
 
@@ -1034,21 +1217,24 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks {
     int p1 = cmd.indexOf("pass=");
     int h1 = cmd.indexOf("host=");
 
-    if (s1 >= 0) {
+    if (s1 >= 0)
+    {
       int end = cmd.indexOf(";", s1);
       if (end < 0)
         end = cmd.length();
       wifiSSID = cmd.substring(s1 + 5, end);
     }
 
-    if (p1 >= 0) {
+    if (p1 >= 0)
+    {
       int end = cmd.indexOf(";", p1);
       if (end < 0)
         end = cmd.length();
       wifiPASS = cmd.substring(p1 + 5, end);
     }
 
-    if (h1 >= 0) {
+    if (h1 >= 0)
+    {
       int end = cmd.indexOf(";", h1);
       if (end < 0)
         end = cmd.length();
@@ -1056,7 +1242,8 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks {
     }
 
     // HARD GUARD: if SSID accidentally contains "WIFI:ssid=", strip it
-    if (wifiSSID.startsWith("WIFI:ssid=")) {
+    if (wifiSSID.startsWith("WIFI:ssid="))
+    {
       wifiSSID.replace("WIFI:ssid=", "");
     }
 
@@ -1068,7 +1255,8 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks {
     Serial.print("HOST: ");
     Serial.println(mdnsHost);
 
-    if (!wifiSSID.length() || !wifiPASS.length()) {
+    if (!wifiSSID.length() || !wifiPASS.length())
+    {
       Serial.println("❌ Invalid Wi‑Fi credentials received, aborting");
       return;
     }
@@ -1092,7 +1280,8 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks {
 };
 
 // ================= SETUP =================
-void setup() {
+void setup()
+{
   Serial.begin(115200);
   delay(1000);
 
@@ -1115,11 +1304,15 @@ void setup() {
   currentAngle = LID_CLOSED;
   Serial.println("🔒 Lid forced closed on startup");
 
-  if (!SPIFFS.begin(false)) {
+  if (!SPIFFS.begin(false))
+  {
     Serial.println("❌ SPIFFS mount failed at boot");
-  } else {
+  }
+  else
+  {
     spiffsMounted = true;
-    if (!SPIFFS.exists(FIRMWARE_DIR)) {
+    if (!SPIFFS.exists(FIRMWARE_DIR))
+    {
       SPIFFS.mkdir(FIRMWARE_DIR);
     }
     Serial.println("📁 SPIFFS ready");
@@ -1137,7 +1330,8 @@ void setup() {
 
   loadSchedule();
 
-  if (deviceMode == "wifi" && wifiSSID.length()) {
+  if (deviceMode == "wifi" && wifiSSID.length())
+  {
     startWifiMode();
     return;
   }
@@ -1148,8 +1342,8 @@ void setup() {
 
   BLEService *service = pServer->createService(SERVICE_UUID);
   pCharacteristic = service->createCharacteristic(
-    CHARACTERISTIC_UUID,
-    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY);
+      CHARACTERISTIC_UUID,
+      BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY);
   pCharacteristic->addDescriptor(new BLE2902());
   pCharacteristic->setCallbacks(new CharacteristicCallbacks());
   pCharacteristic->setValue("READY");
@@ -1162,43 +1356,50 @@ void setup() {
 }
 
 // ================= LOOP =================
-void loop() {
+void loop()
+{
   // ================= RESET BUTTON HANDLING =================
   bool resetButtonState = digitalRead(resetButtonPin);
 
   // Button pressed (HIGH -> LOW)
-  if (resetButtonLast == HIGH && resetButtonState == LOW) {
+  if (resetButtonLast == HIGH && resetButtonState == LOW)
+  {
     Serial.println("🔘 Reset button PRESSED");
     resetButtonPressStart = millis();
     resetTriggered = false;
   }
 
   // Button held down
-  if (resetButtonState == LOW && resetButtonPressStart > 0) {
+  if (resetButtonState == LOW && resetButtonPressStart > 0)
+  {
     unsigned long heldMs = millis() - resetButtonPressStart;
 
     static unsigned long lastDot = 0;
-    if (millis() - lastDot >= 500) {
+    if (millis() - lastDot >= 500)
+    {
       lastDot = millis();
       Serial.print(".");
     }
 
     // After 5 seconds: start continuous danger tone
-    if (heldMs >= 5000 && !resetTriggered) {
+    if (heldMs >= 5000 && !resetTriggered)
+    {
       Serial.println();
       Serial.println("🚨 RESET ARMING — RELEASE TO CONFIRM");
-      toneOn(2800);  // continuous high‑pitched warning tone
+      toneOn(2800); // continuous high‑pitched warning tone
       resetTriggered = true;
     }
   }
 
   // Button released (LOW -> HIGH)
-  if (resetButtonLast == LOW && resetButtonState == HIGH) {
+  if (resetButtonLast == LOW && resetButtonState == HIGH)
+  {
     Serial.println();
     Serial.println("🔘 Reset button RELEASED");
 
     // If reset was armed, releasing triggers factory reset
-    if (resetTriggered) {
+    if (resetTriggered)
+    {
       Serial.println("🧨 FACTORY RESET CONFIRMED");
       toneOff();
       delay(200);
@@ -1212,92 +1413,122 @@ void loop() {
 
   resetButtonLast = resetButtonState;
 
-  if (Serial.available()) {
+  if (Serial.available())
+  {
     String cmd = Serial.readStringUntil('\n');
     cmd.trim();
 
-    if (cmd == "version") {
+    if (cmd == "version")
+    {
       Serial.print("Firmware version: ");
       Serial.println(FW_VERSION);
     }
 
-    if (cmd == "checkupdate") {
+    if (cmd == "checkupdate")
+    {
       checkLatestRelease();
     }
 
-    if (cmd == "download") {
+    if (cmd == "download")
+    {
       checkLatestRelease();
 
       Serial.println("Download latest firmware? (y/n)");
-      while (!Serial.available()) delay(10);
+      while (!Serial.available())
+        delay(10);
       String ans = Serial.readStringUntil('\n');
       ans.trim();
 
-      if (ans == "y" || ans == "Y") {
-        if (latestBinName.length() == 0) {
+      if (ans == "y" || ans == "Y")
+      {
+        if (latestBinName.length() == 0)
+        {
           Serial.println("❌ No latest firmware info available");
-        } else {
+        }
+        else
+        {
           downloadFirmware(latestBinName);
         }
-      } else {
+      }
+      else
+      {
         Serial.println("❎ Download cancelled");
       }
     }
 
-    if (cmd == "list") {
+    if (cmd == "list")
+    {
       listDownloadedFirmware();
     }
 
-    if (cmd == "delete") {
+    if (cmd == "delete")
+    {
       listDownloadedFirmware();
       Serial.println("0. Delete ALL firmware");
       Serial.println("Type number to delete");
 
-      while (!Serial.available()) delay(10);
+      while (!Serial.available())
+        delay(10);
       String sel = Serial.readStringUntil('\n');
       sel.trim();
 
       int choice = sel.toInt();
 
-      if (choice == 0) {
+      if (choice == 0)
+      {
         deleteAllFirmware();
-      } else if (choice > 0) {
+      }
+      else if (choice > 0)
+      {
         deleteFirmwareByIndex(choice);
-      } else {
+      }
+      else
+      {
         Serial.println("❌ Invalid choice");
       }
     }
 
-    if (cmd == "install") {
+    if (cmd == "install")
+    {
       listDownloadedFirmware();
       delay(50);
       Serial.println("Type number to install");
-      while (!Serial.available()) delay(10);
+      while (!Serial.available())
+        delay(10);
       String sel = Serial.readStringUntil('\n');
       sel.trim();
 
       int choice = sel.toInt();
-      if (choice > 0) {
+      if (choice > 0)
+      {
         installFirmwareFromSPIFFS(choice);
-      } else {
+      }
+      else
+      {
         Serial.println("❌ Invalid choice");
       }
     }
 
-    if (cmd == "update") {
+    if (cmd == "update")
+    {
       fullAutoUpdate();
     }
 
-    if (cmd == "open") moveLidOpen();
-    if (cmd == "close") moveLidClosed();
-    if (cmd == "factory") {
+    if (cmd == "open")
+      moveLidOpen();
+    if (cmd == "close")
+      moveLidClosed();
+    if (cmd == "factory")
+    {
       factoryReset();
       ESP.restart();
     }
-    if (cmd == "network") {
+    if (cmd == "network")
+    {
       Serial.println("🧪 Serial Wi‑Fi scan (5s test)");
       unsigned long start = millis();
-      while (millis() - start < 5000) {
+      while (millis() - start < 5000)
+      {
         performWifiScan(true);
         delay(1000);
       }
@@ -1305,16 +1536,20 @@ void loop() {
   }
 
   // Print time once per minute, exactly at :00 seconds (non-blocking)
-  if (deviceMode == "wifi") {
+  if (deviceMode == "wifi")
+  {
     struct tm t;
-    if (getLocalTime(&t)) {
-      if (t.tm_sec == 0 && (t.tm_min != lastPrintedMinute || t.tm_hour != lastPrintedHour)) {
+    if (getLocalTime(&t))
+    {
+      if (t.tm_sec == 0 && (t.tm_min != lastPrintedMinute || t.tm_hour != lastPrintedHour))
+      {
         lastPrintedMinute = t.tm_min;
         lastPrintedHour = t.tm_hour;
         Serial.printf("⏰ Time: %02d:%02d:%02d\n", t.tm_hour, t.tm_min, t.tm_sec);
       }
 
-      if (hasSchedule && !scheduleExecutedToday && t.tm_hour == scheduledHour && t.tm_min == scheduledMinute) {
+      if (hasSchedule && !scheduleExecutedToday && t.tm_hour == scheduledHour && t.tm_min == scheduledMinute)
+      {
         Serial.println("🍽️ Executing scheduled feed");
         scheduledFeedBeep();
         moveLidOpen();
@@ -1331,7 +1566,8 @@ void loop() {
       }
 
       // Reset daily execution flag at midnight
-      if (t.tm_hour == 0 && t.tm_min == 0 && t.tm_sec == 0) {
+      if (t.tm_hour == 0 && t.tm_min == 0 && t.tm_sec == 0)
+      {
         scheduleExecutedToday = false;
       }
     }
@@ -1345,15 +1581,18 @@ void loop() {
   //   }
   // }
 
-  if (deviceMode == "wifi") {
+  if (deviceMode == "wifi")
+  {
     server.handleClient();
   }
 
-  if (deviceMode == "wifi") {
+  if (deviceMode == "wifi")
+  {
     ArduinoOTA.handle();
   }
 
-  if (deviceMode == "wifi" && millis() - lastDiscoveryBroadcast > 6000) {
+  if (deviceMode == "wifi" && millis() - lastDiscoveryBroadcast > 6000)
+  {
     lastDiscoveryBroadcast = millis();
 
     String host = mdnsHost.length() ? mdnsHost : "petfeeder";
