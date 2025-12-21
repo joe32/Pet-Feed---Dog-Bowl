@@ -42,6 +42,7 @@ String otaMessage = "";    // human-readable status
 bool otaRequested = false;
 bool otaRunning = false;
 TaskHandle_t otaTaskHandle = nullptr;
+TaskHandle_t serverTaskHandle = nullptr;
 
 // Track SPIFFS mount state (some environments fail if you call begin() in multiple places)
 bool spiffsMounted = false;
@@ -317,12 +318,15 @@ bool downloadFirmware(const String &binName)
     int len = stream->readBytes(buffer, sizeof(buffer));
     if (len <= 0)
       break;
+
     f.write(buffer, len);
     total += len;
+
     if (millis() - lastPrintMs >= 500)
     {
       lastPrintMs = millis();
       float doneMB = total / (1024.0f * 1024.0f);
+
       if (totalSize > 0)
       {
         float totalMB = totalSize / (1024.0f * 1024.0f);
@@ -334,9 +338,14 @@ bool downloadFirmware(const String &binName)
         Serial.printf("⬇️ %.2f MB\n", doneMB);
         otaProgress = String(doneMB, 2) + " MB";
       }
+
       otaStatus = "downloading";
       otaMessage = "Downloading firmware";
     }
+
+    // CRITICAL: allow WiFi + HTTP server to keep responding
+    delay(1);
+    yield();
   }
 
   f.close();
@@ -506,6 +515,19 @@ void otaTask(void *param)
   otaRunning = false;
   otaTaskHandle = nullptr;
   vTaskDelete(NULL);
+}
+
+void serverTask(void *param)
+{
+  for (;;)
+  {
+    if (deviceMode == "wifi")
+    {
+      server.handleClient();
+      ArduinoOTA.handle();
+    }
+    vTaskDelay(1); // yield to WiFi stack
+  }
 }
 // Helper: Find firmware index by name (1-based for installFirmwareFromSPIFFS)
 int findFirmwareIndexByName(const String &binName)
@@ -1062,9 +1084,9 @@ void startWifiMode()
         "otaTask",
         8192,
         NULL,
-        1,
+        1,          // low priority
         &otaTaskHandle,
-        1
+        0           // RUN OTA ON CORE 0 (WiFi core), keep loop/server on core 1
       );
     }
     server.send(200, "application/json", "{\"status\":\"started\"}");
@@ -1199,6 +1221,18 @@ void startWifiMode()
     server.send(200, "application/json", "{\"status\":\"cancelled\"}"); });
 
   server.begin();
+  if (serverTaskHandle == nullptr)
+  {
+    xTaskCreatePinnedToCore(
+      serverTask,
+      "serverTask",
+      4096,
+      NULL,
+      1,
+      &serverTaskHandle,
+      1   // Core 1: keep HTTP server isolated from OTA
+    );
+  }
 }
 
 // ================= BLE CALLBACKS =================
@@ -1644,15 +1678,7 @@ void loop()
   //   }
   // }
 
-  if (deviceMode == "wifi")
-  {
-    server.handleClient();
-  }
-
-  if (deviceMode == "wifi")
-  {
-    ArduinoOTA.handle();
-  }
+  // server.handleClient() and ArduinoOTA.handle() now run in FreeRTOS serverTask
 
   if (deviceMode == "wifi" && millis() - lastDiscoveryBroadcast > 6000)
   {
