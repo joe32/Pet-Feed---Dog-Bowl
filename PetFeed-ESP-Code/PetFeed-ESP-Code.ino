@@ -28,7 +28,7 @@
 #include <HTTPClient.h>
 #include <SPIFFS.h>
 
-#define FW_VERSION "1.3.1"
+#define FW_VERSION "1.3.2"
 #define FIRMWARE_DIR "/fw"
 
 String latestBinName = "";
@@ -37,6 +37,10 @@ String latestVersionName = "";
 // ===== CHECK-UPDATE RESULT STATE =====
 String checkUpdateResult = "unknown"; // unknown | up_to_date | update_available | error
 String checkUpdateLatest = "";
+
+// ===== AUTO UPDATE RESULT STATE (SEPARATE FROM MANUAL) =====
+String autoCheckResult = "unknown";   // unknown | up_to_date | update_available | error
+String autoCheckLatest = "";
 
 // ===== APP OTA STATUS =====
 String otaStatus = "idle";  // idle | checking | downloading | installing | done | error
@@ -57,9 +61,9 @@ bool autoUpdateEnabled = false;
 int preferredUpdateHour = -1;
 int preferredUpdateMinute = -1;
 
-// automatic update timing (TESTING = 1 minute)
+// automatic update timing (TESTING = 30 seconds)
 unsigned long lastAutoUpdateCheckMs = 0;
-const unsigned long AUTO_UPDATE_INTERVAL_MS = 60000;
+const unsigned long AUTO_UPDATE_INTERVAL_MS = 30000;
 
 // scheduling state
 bool autoUpdateScheduled = false;
@@ -412,18 +416,56 @@ int scheduledMinute = -1;
 bool scheduleExecutedToday = false;
 
 void checkUpdateTask(void *param) {
+  bool isAuto = (param != NULL);
   checkUpdateRunning = true;
 
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("❌ check-update aborted: WiFi not connected");
+    if (isAuto) {
+      autoCheckResult = "error";
+    } else {
+      checkUpdateResult = "error";
+    }
     checkUpdateRunning = false;
     checkUpdateTaskHandle = nullptr;
     vTaskDelete(NULL);
     return;
   }
 
-  Serial.println("🔎 Running check-update task");
+  Serial.println(isAuto ? "🔎 AUTO UPDATE: running check task" : "🔎 Running check-update task");
+
   checkLatestRelease();
+
+  // Copy result into correct bucket
+  if (isAuto) {
+    autoCheckResult = checkUpdateResult;
+    autoCheckLatest = checkUpdateLatest;
+  }
+
+  // ===== AUTO UPDATE SCHEDULING (FIXED) =====
+  if (isAuto && autoUpdateEnabled) {
+    if (checkUpdateResult == "update_available") {
+      Serial.print("🆕 AUTO UPDATE: update found ");
+      Serial.println(checkUpdateLatest);
+
+      if (!autoUpdateScheduled &&
+          preferredUpdateHour >= 0 &&
+          preferredUpdateMinute >= 0) {
+
+        scheduledUpdateHour = preferredUpdateHour;
+        scheduledUpdateMinute = preferredUpdateMinute;
+        autoUpdateScheduled = true;
+        autoUpdateExecutedToday = false;
+
+        Serial.print("⏳ AUTO UPDATE: scheduled for ");
+        Serial.printf("%02d:%02d\n", scheduledUpdateHour, scheduledUpdateMinute);
+      }
+    } else if (checkUpdateResult == "up_to_date") {
+      Serial.println("✅ AUTO UPDATE: already up to date");
+    } else {
+      Serial.println("⚠️ AUTO UPDATE: check failed");
+    }
+  }
 
   checkUpdateRunning = false;
   checkUpdateTaskHandle = nullptr;
@@ -1705,51 +1747,23 @@ void loop() {
 
       Serial.println("🔁 AUTO UPDATE: periodic check triggered");
 
-      // Skip checks while OTA is running
       if (otaRunning) {
         Serial.println("⏸️ AUTO UPDATE: skipped (OTA running)");
       } else if (!checkUpdateRunning && checkUpdateTaskHandle == nullptr) {
-        // reset state, then run check in task
-        checkUpdateResult = "unknown";
-        checkUpdateLatest = "";
-        autoUpdateCheckPending = true;
-        autoUpdateCheckStartedMs = millis();
+        autoCheckResult = "unknown";
+        autoCheckLatest = "";
 
         xTaskCreatePinnedToCore(
           checkUpdateTask,
           "checkUpdateTaskAuto",
           6144,
-          NULL,
+          (void*)1,   // <-- mark as AUTO
           1,
           &checkUpdateTaskHandle,
           0
         );
       } else {
         Serial.println("⏸️ AUTO UPDATE: skipped (check already running)");
-      }
-    }
-
-    // If an auto check finished, decide whether to schedule
-    if (autoUpdateCheckPending && !checkUpdateRunning) {
-      autoUpdateCheckPending = false;
-
-      if (checkUpdateResult == "update_available") {
-        Serial.print("🆕 AUTO UPDATE: update available ");
-        Serial.println(checkUpdateLatest);
-
-        if (!autoUpdateScheduled && preferredUpdateHour >= 0 && preferredUpdateMinute >= 0) {
-          scheduledUpdateHour = preferredUpdateHour;
-          scheduledUpdateMinute = preferredUpdateMinute;
-          autoUpdateScheduled = true;
-          autoUpdateExecutedToday = false;
-
-          Serial.print("⏳ AUTO UPDATE: scheduled for ");
-          Serial.printf("%02d:%02d\n", scheduledUpdateHour, scheduledUpdateMinute);
-        }
-      } else if (checkUpdateResult == "up_to_date") {
-        Serial.println("✅ AUTO UPDATE: device already up to date");
-      } else {
-        Serial.println("⚠️ AUTO UPDATE: check failed or unknown result");
       }
     }
   }
