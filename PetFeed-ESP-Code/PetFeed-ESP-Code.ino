@@ -361,6 +361,8 @@ bool deviceConnected = false;
 
 // ================= STORAGE =================
 Preferences prefs;
+bool wifiEverConnected = false;
+bool wifiCredsPending = false;
 
 // ================= WIFI / HTTP =================
 WebServer server(80);
@@ -856,13 +858,36 @@ void startWifiMode()
   if (WiFi.status() != WL_CONNECTED)
   {
     Serial.println("❌ Wi-Fi failed");
-    factoryReset();
+
+    // Only factory reset if this is the FIRST ever Wi‑Fi setup
+    // or immediately after credentials were changed
+    prefs.begin("petfeed", true);
+    bool everConnected = prefs.getBool("wifiEverConnected", false);
+    bool credsPending = prefs.getBool("wifiCredsPending", false);
+    prefs.end();
+
+    if (!everConnected || credsPending)
+    {
+      Serial.println("🧨 Wi‑Fi failed during initial setup — factory reset");
+      factoryReset();
+    }
+    else
+    {
+      Serial.println("⚠️ Wi‑Fi failed, but device was previously connected — staying configured");
+    }
+
     ESP.restart();
     return;
   }
 
   Serial.print("✅ IP: ");
   Serial.println(WiFi.localIP());
+
+  // Mark Wi‑Fi as successfully connected at least once
+  prefs.begin("petfeed", false);
+  prefs.putBool("wifiEverConnected", true);
+  prefs.putBool("wifiCredsPending", false);
+  prefs.end();
 
   configTime(0, 0, "pool.ntp.org", "time.nist.gov");
   delay(1500);
@@ -1062,6 +1087,7 @@ void startWifiMode()
     prefs.putString("ssid", newSsid);
     prefs.putString("pass", newPass);
     prefs.putString("mode", "wifi");
+    prefs.putBool("wifiCredsPending", true);
     prefs.end();
 
     server.send(200, "application/json", "{\"status\":\"saved\",\"reboot\":true}");
@@ -1267,6 +1293,7 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks
     prefs.putString("pass", wifiPASS);
     prefs.putString("host", mdnsHost);
     prefs.putString("mode", "wifi");
+    prefs.putBool("wifiCredsPending", true);
     prefs.end();
 
     c->setValue("WIFI_SAVED");
@@ -1327,6 +1354,11 @@ void setup()
   wifiSSID = prefs.getString("ssid", "");
   wifiPASS = prefs.getString("pass", "");
   mdnsHost = prefs.getString("host", "");
+  prefs.end();
+
+  prefs.begin("petfeed", true);
+  wifiEverConnected = prefs.getBool("wifiEverConnected", false);
+  wifiCredsPending = prefs.getBool("wifiCredsPending", false);
   prefs.end();
 
   loadSchedule();
