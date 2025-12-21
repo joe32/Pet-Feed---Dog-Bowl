@@ -123,11 +123,29 @@ export default function UpdatesScreen() {
 
   async function startUpdate() {
     if (!baseUrl) return;
-    setUpdating(true);
-    setUpdateStatus({ phase: "starting" });
-    await fetch(`${baseUrl}/update`);
-    // Start polling for update status after initiating update
-    pollUpdateStatus();
+
+    try {
+      console.log("[updates] POST /update", `${baseUrl}/update`);
+      setUpdating(true);
+      setUpdateStatus({ phase: "starting" });
+
+      const res = await fetchWithTimeout(
+        `${baseUrl}/update`,
+        { method: "POST" },
+        5000
+      );
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
+
+      // Immediately begin polling AFTER update has been triggered
+      pollUpdateStatus();
+    } catch (e) {
+      console.log("[updates] /update failed", String(e));
+      setUpdating(false);
+      setUpdateStatus(null);
+    }
   }
 
   async function pollUpdateStatus() {

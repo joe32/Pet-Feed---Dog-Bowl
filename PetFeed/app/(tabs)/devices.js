@@ -48,6 +48,30 @@ async function pingHost(host) {
   }
 }
 
+// Helper to check update availability for a device
+async function checkUpdateForHost(host) {
+  try {
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 3000);
+
+    const res = await fetch(`http://${host}.local/check-update`, {
+      signal: controller.signal,
+    });
+
+    clearTimeout(t);
+    if (!res.ok) return { hasUpdate: false };
+
+    const json = await res.json();
+    // expected: { status: "up-to-date" } OR { status: "available", version: "x.y.z" }
+    if (json.status === "available") {
+      return { hasUpdate: true, version: json.version };
+    }
+    return { hasUpdate: false };
+  } catch {
+    return { hasUpdate: false };
+  }
+}
+
 export default function DevicesScreen() {
   const router = useRouter();
   const scheme = useColorScheme() ?? "light";
@@ -71,6 +95,8 @@ export default function DevicesScreen() {
       ...d,
       mode: d.mode || "wifi",
       online: typeof d.online === "boolean" ? d.online : false,
+      updateAvailable: false,
+      updateVersion: null,
     }));
     setDevices(normalised);
 
@@ -125,8 +151,32 @@ export default function DevicesScreen() {
         if (active) {
           setActiveDeviceId(active);
         }
+
+        // Reset update info before checking
+        setDevices((prev) =>
+          prev.map((d) => ({
+            ...d,
+            updateAvailable: false,
+            updateVersion: null,
+          }))
+        );
+
+        const checked = await Promise.all(
+          devices.map(async (d) => {
+            if (!d.host) return d;
+            const result = await checkUpdateForHost(d.host);
+            return {
+              ...d,
+              updateAvailable: result.hasUpdate,
+              updateVersion: result.version || null,
+            };
+          })
+        );
+
+        setDevices(checked);
+        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(checked));
       })();
-    }, [])
+    }, [devices])
   );
 
   // useFocusEffect(
@@ -408,10 +458,28 @@ Firmware: ${device.firmware || "Unknown"}`,
               <Text style={[styles.deviceName, { color: colors.text }]}>
                 {device.name}
               </Text>
-              <Text style={{ color: colors.textSecondary, fontSize: 14 }}>
-                {isActive ? "Selected" : "Not selected"} ·{" "}
-                {device.online ? "Online" : "Offline"}
-              </Text>
+              <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap" }}>
+                <Text style={{ color: colors.textSecondary, fontSize: 14 }}>
+                  {isActive ? "Selected" : "Not selected"} ·{" "}
+                  {device.online ? "Online" : "Offline"}
+                </Text>
+                {device.updateAvailable && (
+                  <View style={{ flexDirection: "row", alignItems: "center", marginLeft: 6 }}>
+                    <View
+                      style={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: 4,
+                        backgroundColor: "#0A84FF",
+                        marginRight: 4,
+                      }}
+                    />
+                    <Text style={{ color: "#0A84FF", fontWeight: "700", fontSize: 14 }}>
+                      Update available
+                    </Text>
+                  </View>
+                )}
+              </View>
               <Text
                 style={{
                   color: colors.textSecondary,
@@ -422,6 +490,21 @@ Firmware: ${device.firmware || "Unknown"}`,
                 Connection:{" "}
                 {device.mode === "local" ? "Local device" : "Wi‑Fi (local)"}
               </Text>
+              {device.updateAvailable && (
+                <TouchableOpacity
+                  onPress={() =>
+                    router.push({
+                      pathname: "/(device-setup)/updates",
+                      params: { host: device.host, name: device.name },
+                    })
+                  }
+                  style={{ marginTop: 6 }}
+                >
+                  <Text style={{ color: "#0A84FF", fontWeight: "600", fontSize: 13 }}>
+                    Update
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
 
             <View style={styles.inlineActions}>

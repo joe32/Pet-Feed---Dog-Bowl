@@ -98,6 +98,14 @@ export default function AddDeviceScreen() {
     setWifiTimedOut(false);
     setWifiNetworks([]);
 
+    // BLE-based Wi-Fi scan request
+    console.log("scanWifiNetworks: requesting scan via BLE");
+    try {
+      await sendWifiCredentials("WIFISCAN");
+    } catch (e) {
+      console.log("scanWifiNetworks: BLE request failed", e?.message || e);
+    }
+
     // HARD UI TIMEOUT — this MUST always fire after 10s
     wifiUiTimeoutRef.current = setTimeout(() => {
       if (wifiActiveSeqRef.current !== seq) return;
@@ -108,46 +116,6 @@ export default function AddDeviceScreen() {
       setLoadingWifi(false);
       setWifiTimedOut(true);
     }, 10000);
-
-    // Expo / preview: DO NOT attempt fetch, just wait for timeout
-    if (!generatedHost || generatedHost === "test-host") {
-      console.log("scanWifiNetworks: preview mode, skipping fetch");
-      return;
-    }
-
-    const controller = new AbortController();
-    wifiAbortRef.current = controller;
-
-    const url = `http://${generatedHost}.local/WIFISCAN`;
-    console.log("scanWifiNetworks: fetching", url);
-
-    try {
-      const res = await fetch(url, { signal: controller.signal });
-
-      if (wifiActiveSeqRef.current !== seq) return;
-
-      if (res.ok) {
-        const data = await res.json();
-        if (wifiActiveSeqRef.current !== seq) return;
-        if (Array.isArray(data?.networks)) {
-          setWifiNetworks(data.networks);
-        }
-      }
-    } catch (e) {
-      if (wifiActiveSeqRef.current !== seq) return;
-      console.log("scanWifiNetworks: fetch error", e?.message || e);
-    } finally {
-      if (wifiActiveSeqRef.current !== seq) return;
-
-      if (wifiUiTimeoutRef.current) {
-        clearTimeout(wifiUiTimeoutRef.current);
-        wifiUiTimeoutRef.current = null;
-      }
-      wifiAbortRef.current = null;
-
-      setLoadingWifi(false);
-      setWifiTimedOut(true);
-    }
   }
 
   // Track the generated hostname during setup

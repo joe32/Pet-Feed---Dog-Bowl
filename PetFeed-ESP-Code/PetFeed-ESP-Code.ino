@@ -1006,32 +1006,6 @@ void startWifiMode()
   server.on("/ping", []()
             { server.send(200, "application/json", "{\"type\":\"petfeed\"}"); });
 
-  // ================= WIFI SCAN (APP) =================
-  server.on("/WIFISCAN", HTTP_GET, []()
-            {
-    Serial.println("📥 HTTP /WIFISCAN called");
-
-    performWifiScan(false);
-
-    StaticJsonDocument<512> doc;
-    JsonArray arr = doc.createNestedArray("networks");
-
-    if (lastWifiScanResult.length()) {
-      int start = 0;
-      while (true) {
-        int idx = lastWifiScanResult.indexOf(",", start);
-        if (idx == -1) {
-          arr.add(lastWifiScanResult.substring(start));
-          break;
-        }
-        arr.add(lastWifiScanResult.substring(start, idx));
-        start = idx + 1;
-      }
-    }
-
-    String res;
-    serializeJson(doc, res);
-    server.send(200, "application/json", res); });
 
   server.on("/command", HTTP_POST, []()
             {
@@ -1343,6 +1317,7 @@ void startWifiMode()
     server.send(200, "application/json", "{\"status\":\"cancelled\"}"); });
 
   server.begin();
+  Serial.println("🚫 HTTP /WIFISCAN disabled — BLE only");
   if (serverTaskHandle == nullptr)
   {
     xTaskCreatePinnedToCore(
@@ -1381,8 +1356,37 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks
     Serial.println(c->getValue().c_str());
 
     String cmd = String(c->getValue().c_str());
-
     cmd.trim();
+
+    // ================= WIFI SCAN (BLE) =================
+    if (cmd == "WIFISCAN")
+    {
+      Serial.println("📡 BLE WIFISCAN command received");
+
+      int n = WiFi.scanNetworks(/*async=*/false, /*hidden=*/true);
+
+      if (n <= 0)
+      {
+        c->setValue("WIFISCAN:EMPTY");
+        c->notify();
+        Serial.println("⚠️ BLE WIFISCAN: no networks found");
+        return;
+      }
+
+      String result = "WIFISCAN:";
+      for (int i = 0; i < n; i++)
+      {
+        result += WiFi.SSID(i);
+        if (i < n - 1) result += ",";
+      }
+
+      c->setValue(result.c_str());
+      c->notify();
+
+      Serial.print("📤 BLE WIFISCAN response sent: ");
+      Serial.println(result);
+      return;
+    }
 
     // ================= WIFI SCAN (BLE) =================
     if (cmd == "WIFISCAN")
