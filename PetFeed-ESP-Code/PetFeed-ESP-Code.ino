@@ -28,7 +28,7 @@
 #include <HTTPClient.h>
 #include <SPIFFS.h>
 
-#define FW_VERSION "1.2.9"
+#define FW_VERSION "1.3.1"
 #define FIRMWARE_DIR "/fw"
 
 String latestBinName = "";
@@ -1089,11 +1089,18 @@ void startWifiMode() {
   server.on("/check-update", HTTP_GET, []() {
     Serial.println("📥 HTTP /check-update called");
 
-    // Reset result before running
-    checkUpdateResult = "unknown";
-    checkUpdateLatest = "";
+    // If a check is already running, wait for it to finish (up to 5s)
+    unsigned long startWait = millis();
+    while (checkUpdateRunning && millis() - startWait < 5000) {
+      delay(20);
+      yield();
+    }
 
+    // If no check is running, start one and block until it finishes
     if (!checkUpdateRunning && checkUpdateTaskHandle == nullptr) {
+      // Mark as running BEFORE starting the task so HTTP waits correctly
+      checkUpdateRunning = true;
+
       xTaskCreatePinnedToCore(
         checkUpdateTask,
         "checkUpdateTask",
@@ -1103,15 +1110,16 @@ void startWifiMode() {
         &checkUpdateTaskHandle,
         0
       );
+
+      // Wait for task to finish (max 5s)
+      unsigned long start = millis();
+      while (checkUpdateRunning && millis() - start < 5000) {
+        delay(20);
+        yield();
+      }
     }
 
-    // Give task a moment to run (non-blocking safety delay)
-    unsigned long start = millis();
-    while (checkUpdateRunning && millis() - start < 3000) {
-      delay(20);
-      yield();
-    }
-
+    // Respond with the LAST COMPLETED result
     StaticJsonDocument<128> doc;
     doc["status"] = checkUpdateResult;
     doc["latest"] = checkUpdateLatest;
@@ -1119,6 +1127,10 @@ void startWifiMode() {
 
     String res;
     serializeJson(doc, res);
+
+    Serial.print("📤 /check-update response: ");
+    Serial.println(res);
+
     server.send(200, "application/json", res);
   });
 
