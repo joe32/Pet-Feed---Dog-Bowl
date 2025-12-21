@@ -28,7 +28,7 @@
 #include <HTTPClient.h>
 #include <SPIFFS.h>
 
-#define FW_VERSION "1.0.3"
+#define FW_VERSION "1.1.3"
 #define FIRMWARE_DIR "/fw"
 
 String latestBinName = "";
