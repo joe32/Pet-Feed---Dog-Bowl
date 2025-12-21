@@ -28,7 +28,7 @@
 #include <HTTPClient.h>
 #include <SPIFFS.h>
 
-#define FW_VERSION "1.3.2"
+#define FW_VERSION "1.3.3"
 #define FIRMWARE_DIR "/fw"
 
 String latestBinName = "";
@@ -70,6 +70,7 @@ bool autoUpdateScheduled = false;
 int scheduledUpdateHour = -1;
 int scheduledUpdateMinute = -1;
 bool autoUpdateExecutedToday = false;
+bool autoUpdateStarted = false; // prevents missing tm_sec==0 / double-start within the same minute
 
 // auto-check task coordination
 bool autoUpdateCheckPending = false;
@@ -456,6 +457,7 @@ void checkUpdateTask(void *param) {
         scheduledUpdateMinute = preferredUpdateMinute;
         autoUpdateScheduled = true;
         autoUpdateExecutedToday = false;
+        autoUpdateStarted = false;
 
         Serial.print("⏳ AUTO UPDATE: scheduled for ");
         Serial.printf("%02d:%02d\n", scheduledUpdateHour, scheduledUpdateMinute);
@@ -1741,29 +1743,35 @@ void loop() {
   // ================= AUTO UPDATE CHECK (EVERY 1 MIN - TESTING) =================
   // IMPORTANT: never run the HTTP update check on the main loop (can trigger watchdog / reboots).
   // Always run it in the existing FreeRTOS task, and never while OTA is running.
-  if (deviceMode == "wifi" && autoUpdateEnabled) {
-    if (millis() - lastAutoUpdateCheckMs >= AUTO_UPDATE_INTERVAL_MS) {
-      lastAutoUpdateCheckMs = millis();
+  if (deviceMode == "wifi") {
+    if (!autoUpdateEnabled) {
+      autoUpdateScheduled = false;
+      autoUpdateStarted = false;
+    }
+    if (autoUpdateEnabled) {
+      if (millis() - lastAutoUpdateCheckMs >= AUTO_UPDATE_INTERVAL_MS) {
+        lastAutoUpdateCheckMs = millis();
 
-      Serial.println("🔁 AUTO UPDATE: periodic check triggered");
+        Serial.println("🔁 AUTO UPDATE: periodic check triggered");
 
-      if (otaRunning) {
-        Serial.println("⏸️ AUTO UPDATE: skipped (OTA running)");
-      } else if (!checkUpdateRunning && checkUpdateTaskHandle == nullptr) {
-        autoCheckResult = "unknown";
-        autoCheckLatest = "";
+        if (otaRunning) {
+          Serial.println("⏸️ AUTO UPDATE: skipped (OTA running)");
+        } else if (!checkUpdateRunning && checkUpdateTaskHandle == nullptr) {
+          autoCheckResult = "unknown";
+          autoCheckLatest = "";
 
-        xTaskCreatePinnedToCore(
-          checkUpdateTask,
-          "checkUpdateTaskAuto",
-          6144,
-          (void*)1,   // <-- mark as AUTO
-          1,
-          &checkUpdateTaskHandle,
-          0
-        );
-      } else {
-        Serial.println("⏸️ AUTO UPDATE: skipped (check already running)");
+          xTaskCreatePinnedToCore(
+            checkUpdateTask,
+            "checkUpdateTaskAuto",
+            6144,
+            (void*)1,   // <-- mark as AUTO
+            1,
+            &checkUpdateTaskHandle,
+            0
+          );
+        } else {
+          Serial.println("⏸️ AUTO UPDATE: skipped (check already running)");
+        }
       }
     }
   }
@@ -1794,30 +1802,34 @@ void loop() {
         Serial.println("🗑️ Schedule cleared after execution");
       }
 
-      // Reset daily execution flag at midnight
+      // Reset daily execution flags at midnight
       if (t.tm_hour == 0 && t.tm_min == 0 && t.tm_sec == 0) {
         scheduleExecutedToday = false;
+        autoUpdateExecutedToday = false;
+        autoUpdateStarted = false;
       }
 
       // ================= AUTO UPDATE EXECUTION =================
       if (autoUpdateScheduled &&
           autoUpdateEnabled &&
           !autoUpdateExecutedToday &&
+          !autoUpdateStarted &&
           preferredUpdateHour >= 0 &&
           preferredUpdateMinute >= 0 &&
           WiFi.status() == WL_CONNECTED &&
           t.tm_hour == scheduledUpdateHour &&
-          t.tm_min == scheduledUpdateMinute &&
-          t.tm_sec == 0) {
+          t.tm_min == scheduledUpdateMinute) {
 
-        Serial.println("🚀 AUTO UPDATE: preferred time reached");
-        Serial.print("🕒 AUTO UPDATE executing at ");
-        Serial.printf("%02d:%02d\n", t.tm_hour, t.tm_min);
+        Serial.println("🚀 AUTO UPDATE: scheduled time reached");
+        Serial.print("🕒 AUTO UPDATE about to start at ");
+        Serial.printf("%02d:%02d:%02d\n", t.tm_hour, t.tm_min, t.tm_sec);
 
+        autoUpdateStarted = true;          // prevent double-trigger within the same minute
         autoUpdateExecutedToday = true;
         autoUpdateScheduled = false;
 
         if (!otaRunning && otaTaskHandle == nullptr) {
+          Serial.println("🚀 AUTO UPDATE: starting OTA task now");
           otaStatus = "checking";
           otaMessage = "Automatic update started";
           xTaskCreatePinnedToCore(
@@ -1830,7 +1842,7 @@ void loop() {
             0
           );
         } else {
-          Serial.println("⚠️ AUTO UPDATE skipped: OTA already running");
+          Serial.println("⚠️ AUTO UPDATE aborted: OTA already running");
         }
       }
     }
