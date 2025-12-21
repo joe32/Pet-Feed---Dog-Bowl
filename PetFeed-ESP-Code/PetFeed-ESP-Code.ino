@@ -28,7 +28,7 @@
 #include <HTTPClient.h>
 #include <SPIFFS.h>
 
-#define FW_VERSION "1.0.1"
+#define FW_VERSION "1.0.3"
 #define FIRMWARE_DIR "/fw"
 
 String latestBinName = "";
@@ -1190,6 +1190,10 @@ void loop() {
       } else {
         Serial.println("❎ Download cancelled");
       }
+    }
+
+    if (cmd == "list") {
+      listDownloadedFirmware();
     }
 
     if (cmd == "delete") {
