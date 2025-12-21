@@ -28,7 +28,7 @@
 #include <HTTPClient.h>
 #include <SPIFFS.h>
 
-#define FW_VERSION "1.2.4"
+#define FW_VERSION "1.2.5"
 #define FIRMWARE_DIR "/fw"
 
 String latestBinName = "";
@@ -1317,7 +1317,7 @@ void startWifiMode()
     server.send(200, "application/json", "{\"status\":\"cancelled\"}"); });
 
   server.begin();
-  Serial.println("🚫 HTTP /WIFISCAN disabled — BLE only");
+  // Serial.println("🚫 HTTP /WIFISCAN disabled — BLE only");
   if (serverTaskHandle == nullptr)
   {
     xTaskCreatePinnedToCore(

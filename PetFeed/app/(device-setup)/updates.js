@@ -1,13 +1,15 @@
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, ActivityIndicator, Platform } from "react-native";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import { useColorScheme } from "react-native";
 import { Colors } from "../../constants/theme";
 import { useLocalSearchParams } from "expo-router";
 
 // const DEV_FAKE_UPDATE = true; // TEMP: remove later
 // const DEV_FAKE_VERSION = "1.2.2"; // TEMP: fake newer version
+
+const DEV_FORCE_UPDATE = false; // set true to force fake update UI
 
 const POLL_INTERVAL = 1500;
 
@@ -43,6 +45,7 @@ export default function UpdatesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [checking, setChecking] = useState(false);
   const [updating, setUpdating] = useState(false);
+  const pollRef = useRef(null);
 
   const [currentVersion, setCurrentVersion] = useState(null);
   const [updateInfo, setUpdateInfo] = useState(null); // { status: 'up-to-date' | 'update-available', latest }
@@ -82,6 +85,11 @@ export default function UpdatesScreen() {
   async function checkForUpdates() {
     if (!baseUrl) return;
     setChecking(true);
+    if (DEV_FORCE_UPDATE) {
+      setUpdateInfo({ status: "update-available", latest: "9.9.9" });
+      setChecking(false);
+      return;
+    }
     try {
       console.log("[updates] GET /check-update", `${baseUrl}/check-update`);
 
@@ -126,8 +134,18 @@ export default function UpdatesScreen() {
 
     try {
       console.log("[updates] POST /update", `${baseUrl}/update`);
+
+      // Immediately switch UI into updating mode
       setUpdating(true);
-      setUpdateStatus({ phase: "starting" });
+      setChecking(false);
+      setUpdateInfo(null);
+
+      // Set an initial visible state so the progress card renders instantly
+      setUpdateStatus({
+        phase: "downloading",
+        downloadedMb: 0,
+        totalMb: 0,
+      });
 
       const res = await fetchWithTimeout(
         `${baseUrl}/update`,
@@ -139,8 +157,14 @@ export default function UpdatesScreen() {
         throw new Error(`HTTP ${res.status}`);
       }
 
-      // Immediately begin polling AFTER update has been triggered
-      pollUpdateStatus();
+      // Ensure only one poller exists
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+
+      // Start polling update status
+      pollRef.current = setInterval(pollUpdateStatus, POLL_INTERVAL);
     } catch (e) {
       console.log("[updates] /update failed", String(e));
       setUpdating(false);
@@ -150,19 +174,36 @@ export default function UpdatesScreen() {
 
   async function pollUpdateStatus() {
     try {
-      const res = await fetch(`${baseUrl}/update-status`);
-      const json = await res.json();
+      console.log("[updates] GET /update-status", `${baseUrl}/update-status`);
+      const res = await fetchWithTimeout(`${baseUrl}/update-status`, {}, 3000);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await tryJson(res);
+
       setUpdateStatus(json);
 
+      // Stop polling once update is fully complete
+      if (json.phase === "done" || json.phase === "idle") {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+        setUpdating(false);
+        setUpdateStatus(null);
+        await fullRefresh();
+        return;
+      }
+
       if (json.phase === "rebooting") {
-        // wait for device to come back, then refresh everything
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+
         setTimeout(async () => {
           setUpdating(false);
           setUpdateStatus(null);
           await fullRefresh();
         }, 30000);
       }
-    } catch {}
+    } catch (e) {
+      console.log("[updates] poll failed", String(e));
+    }
   }
 
   async function fetchAutoUpdatePrefs() {
@@ -240,11 +281,6 @@ export default function UpdatesScreen() {
     if (baseUrl) fullRefresh();
   }, [baseUrl]);
 
-  useEffect(() => {
-    if (!updating) return;
-    const id = setInterval(pollUpdateStatus, POLL_INTERVAL);
-    return () => clearInterval(id);
-  }, [updating]);
 
   const onRefresh = useCallback(async () => {
     await fullRefresh();
@@ -291,7 +327,7 @@ export default function UpdatesScreen() {
         )}
 
         {updating && updateStatus && (
-          <View style={[styles.card, { backgroundColor: colors.card }]}>            
+          <View style={[styles.card, { backgroundColor: colors.card }]}>
             {updateStatus.phase === "downloading" && (
               <View>
                 <Text style={[styles.updateTitle, { color: colors.text }]}>Downloading</Text>
@@ -299,12 +335,21 @@ export default function UpdatesScreen() {
                   {updateStatus.downloadedMb}/{updateStatus.totalMb} MB
                 </Text>
                 <View style={styles.progressBarBackground}>
-                  <View
-                    style={[
-                      styles.progressBarFill,
-                      { width: `${(updateStatus.downloadedMb / updateStatus.totalMb) * 100}%` },
-                    ]}
-                  />
+                  {typeof updateStatus.downloadedMb === "number" &&
+                   typeof updateStatus.totalMb === "number" &&
+                   updateStatus.totalMb > 0 && (
+                     <View
+                       style={[
+                         styles.progressBarFill,
+                         {
+                           width: `${Math.min(
+                             100,
+                             (updateStatus.downloadedMb / updateStatus.totalMb) * 100
+                           )}%`,
+                         },
+                       ]}
+                     />
+                  )}
                 </View>
               </View>
             )}
