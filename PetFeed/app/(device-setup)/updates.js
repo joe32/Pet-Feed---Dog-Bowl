@@ -46,6 +46,8 @@ export default function UpdatesScreen() {
   const [checking, setChecking] = useState(false);
   const [updating, setUpdating] = useState(false);
   const pollRef = useRef(null);
+  const updateStartedAtRef = useRef(null);
+  const sawNonIdleRef = useRef(false);
 
   const [currentVersion, setCurrentVersion] = useState(null);
   const [updateInfo, setUpdateInfo] = useState(null); // { status: 'up-to-date' | 'update-available', latest }
@@ -123,7 +125,7 @@ export default function UpdatesScreen() {
       }
     } catch (e) {
       console.log("[updates] /check-update failed", String(e));
-      setUpdateInfo(null);
+      setUpdateInfo({ status: "error" });
     } finally {
       setChecking(false);
     }
@@ -135,27 +137,20 @@ export default function UpdatesScreen() {
     try {
       console.log("[updates] POST /update", `${baseUrl}/update`);
 
-      // Immediately switch UI into updating mode
+      // Enter updating mode immediately so the progress UI stays visible
       setUpdating(true);
       setChecking(false);
-      setUpdateInfo(null);
 
-      // Set an initial visible state so the progress card renders instantly
+      updateStartedAtRef.current = Date.now();
+      sawNonIdleRef.current = false;
+
+      // Seed a visible state so the progress card renders instantly
       setUpdateStatus({
-        phase: "downloading",
+        phase: "starting",
         downloadedMb: 0,
         totalMb: 0,
+        message: "Starting update…",
       });
-
-      const res = await fetchWithTimeout(
-        `${baseUrl}/update`,
-        { method: "POST" },
-        5000
-      );
-
-      if (!res.ok) {
-        throw new Error(`HTTP ${res.status}`);
-      }
 
       // Ensure only one poller exists
       if (pollRef.current) {
@@ -163,26 +158,102 @@ export default function UpdatesScreen() {
         pollRef.current = null;
       }
 
-      // Start polling update status
+      // Start polling immediately (OTA may begin before /update responds)
       pollRef.current = setInterval(pollUpdateStatus, POLL_INTERVAL);
+
+      // Fire the update request
+      const res = await fetchWithTimeout(
+        `${baseUrl}/update`,
+        { method: "POST" },
+        8000
+      );
+
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`);
+      }
     } catch (e) {
       console.log("[updates] /update failed", String(e));
+      // Stop polling + exit updating UI
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
       setUpdating(false);
       setUpdateStatus(null);
     }
   }
 
   async function pollUpdateStatus() {
+    if (!baseUrl) return;
+
     try {
       console.log("[updates] GET /update-status", `${baseUrl}/update-status`);
       const res = await fetchWithTimeout(`${baseUrl}/update-status`, {}, 3000);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await tryJson(res);
 
-      setUpdateStatus(json);
+      // Normalize a few shapes coming back from the ESP
+      const phase = typeof json?.phase === "string" ? json.phase : (typeof json === "string" ? json : null);
+      const downloadedMb = typeof json?.downloadedMb === "number" ? json.downloadedMb : (typeof json?.downloadedMb === "string" ? Number(json.downloadedMb) : undefined);
+      const totalMb = typeof json?.totalMb === "number" ? json.totalMb : (typeof json?.totalMb === "string" ? Number(json.totalMb) : undefined);
+      const message = typeof json?.message === "string" ? json.message : undefined;
+
+      const normalized = {
+        ...(typeof json === "object" && json ? json : {}),
+        phase: phase || "unknown",
+        downloadedMb: Number.isFinite(downloadedMb) ? downloadedMb : 0,
+        totalMb: Number.isFinite(totalMb) ? totalMb : 0,
+        message,
+      };
+
+      // If the ESP reports anything other than idle, remember it so we don't treat a later idle as "finished"
+      if (normalized.phase && normalized.phase !== "idle") {
+        sawNonIdleRef.current = true;
+      }
+
+      // IMPORTANT: Do not stop polling just because phase is idle.
+      // Some builds report idle while preparing, or briefly between phases.
+      if (normalized.phase === "idle" && updating) {
+        const startedAt = updateStartedAtRef.current || Date.now();
+        const elapsedMs = Date.now() - startedAt;
+
+        // If we haven't seen progress yet, keep the UI visible as "Starting…"
+        if (!sawNonIdleRef.current && elapsedMs < 60000) {
+          setUpdateStatus({
+            phase: "starting",
+            downloadedMb: 0,
+            totalMb: 0,
+            message: "Preparing update…",
+          });
+          return;
+        }
+
+        // If we DID see non-idle phases and now it's idle, treat that as complete.
+        if (sawNonIdleRef.current) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+          setUpdating(false);
+          setUpdateStatus(null);
+          await fullRefresh();
+          return;
+        }
+
+        // If it's been a long time and still idle, show an error-like state but keep UI visible.
+        if (elapsedMs >= 60000) {
+          setUpdateStatus({
+            phase: "error",
+            downloadedMb: 0,
+            totalMb: 0,
+            message: "Update did not start. Try again.",
+          });
+          return;
+        }
+      }
+
+      setUpdateStatus(normalized);
 
       // Stop polling once update is fully complete
-      if (json.phase === "done" || json.phase === "idle") {
+      if (normalized.phase === "done") {
         clearInterval(pollRef.current);
         pollRef.current = null;
         setUpdating(false);
@@ -191,7 +262,8 @@ export default function UpdatesScreen() {
         return;
       }
 
-      if (json.phase === "rebooting") {
+      // If the ESP reports rebooting, keep UI visible and retry refresh after a delay
+      if (normalized.phase === "rebooting") {
         clearInterval(pollRef.current);
         pollRef.current = null;
 
@@ -201,8 +273,24 @@ export default function UpdatesScreen() {
           await fullRefresh();
         }, 30000);
       }
+
+      // If the ESP reports error, stop polling but keep a visible state for the user
+      if (normalized.phase === "error") {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+        // keep updateStatus visible; just exit updating mode so user can retry
+        setUpdating(false);
+      }
     } catch (e) {
       console.log("[updates] poll failed", String(e));
+      // Keep the UI visible while polling fails (device may reboot / Wi-Fi flaps)
+      if (updating) {
+        setUpdateStatus((prev) =>
+          prev && typeof prev === "object"
+            ? { ...prev, message: prev.message || "Waiting for device…" }
+            : { phase: "starting", downloadedMb: 0, totalMb: 0, message: "Waiting for device…" }
+        );
+      }
     }
   }
 
@@ -281,6 +369,15 @@ export default function UpdatesScreen() {
     if (baseUrl) fullRefresh();
   }, [baseUrl]);
 
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+    };
+  }, []);
+
 
   const onRefresh = useCallback(async () => {
     await fullRefresh();
@@ -302,7 +399,7 @@ export default function UpdatesScreen() {
         </View>
 
         {!updating && (
-          <View style={[styles.card, { backgroundColor: colors.card }]}>            
+          <View style={[styles.card, { backgroundColor: colors.card }]}>
             {checking ? (
               <ActivityIndicator />
             ) : updateInfo?.status === "up-to-date" ? (
@@ -318,6 +415,12 @@ export default function UpdatesScreen() {
                   <Text style={styles.primaryButtonText}>Update Now</Text>
                 </TouchableOpacity>
               </View>
+            ) : updateInfo?.status === "error" ? (
+              <TouchableOpacity onPress={checkForUpdates} style={styles.linkButton}>
+                <Text style={{ color: colors.tint }}>
+                  Unable to check updates — tap to retry
+                </Text>
+              </TouchableOpacity>
             ) : (
               <TouchableOpacity onPress={checkForUpdates} style={styles.linkButton}>
                 <Text style={{ color: colors.tint }}>Check for updates</Text>
@@ -326,13 +429,21 @@ export default function UpdatesScreen() {
           </View>
         )}
 
-        {updating && updateStatus && (
+        {updating && (
           <View style={[styles.card, { backgroundColor: colors.card }]}>
-            {updateStatus.phase === "downloading" && (
+            {!updateStatus && (
+              <View>
+                <Text style={[styles.updateTitle, { color: colors.text }]}>Updating</Text>
+                <Text style={{ color: colors.textSecondary }}>Waiting for device status…</Text>
+                <ActivityIndicator style={{ marginTop: 10 }} />
+              </View>
+            )}
+
+            {updateStatus?.phase === "downloading" && (
               <View>
                 <Text style={[styles.updateTitle, { color: colors.text }]}>Downloading</Text>
                 <Text style={{ color: colors.textSecondary }}>
-                  {updateStatus.downloadedMb}/{updateStatus.totalMb} MB
+                  {Number(updateStatus.downloadedMb || 0).toFixed(2)}/{Number(updateStatus.totalMb || 0).toFixed(2)} MB
                 </Text>
                 <View style={styles.progressBarBackground}>
                   {typeof updateStatus.downloadedMb === "number" &&
@@ -354,14 +465,33 @@ export default function UpdatesScreen() {
               </View>
             )}
 
-            {updateStatus.phase === "installing" && (
+            {updateStatus?.phase === "starting" && (
+              <View>
+                <Text style={[styles.updateTitle, { color: colors.text }]}>Preparing</Text>
+                <Text style={{ color: colors.textSecondary }}>
+                  {updateStatus.message || "Preparing update…"}
+                </Text>
+                <ActivityIndicator style={{ marginTop: 10 }} />
+              </View>
+            )}
+
+            {updateStatus?.phase === "error" && (
+              <View>
+                <Text style={[styles.updateTitle, { color: colors.text }]}>Update failed</Text>
+                <Text style={{ color: colors.textSecondary }}>
+                  {updateStatus.message || "Something went wrong."}
+                </Text>
+              </View>
+            )}
+
+            {updateStatus?.phase === "installing" && (
               <View>
                 <Text style={[styles.updateTitle, { color: colors.text }]}>Installing</Text>
                 <ActivityIndicator />
               </View>
             )}
 
-            {updateStatus.phase === "rebooting" && (
+            {updateStatus?.phase === "rebooting" && (
               <View>
                 <Text style={[styles.updateTitle, { color: colors.text }]}>Rebooting</Text>
                 <Text style={{ color: colors.textSecondary }}>
