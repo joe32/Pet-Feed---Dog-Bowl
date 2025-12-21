@@ -28,7 +28,7 @@
 #include <HTTPClient.h>
 #include <SPIFFS.h>
 
-#define FW_VERSION "1.1.7"
+#define FW_VERSION "1.1.8"
 #define FIRMWARE_DIR "/fw"
 
 String latestBinName = "";
@@ -808,7 +808,7 @@ void startWifiMode()
   Serial.println("📡 Wi-Fi mode");
 
   // ===== BLE DISABLED IN WIFI MODE =====
-  Serial.println("🔧 Initialising CLAIM BLE service");
+  // Serial.println("🔧 Initialising CLAIM BLE service");
 
   // BLEDevice::init("PetFeeder");
   //
@@ -840,7 +840,7 @@ void startWifiMode()
   BLEDevice::deinit(true);
   delay(200);
 
-  Serial.println("🔵 CLAIM BLE advertising started (Wi‑Fi mode)");
+  // Serial.println("🔵 CLAIM BLE advertising started (Wi‑Fi mode)");
 
   WiFi.mode(WIFI_STA);
   WiFi.begin(wifiSSID.c_str(), wifiPASS.c_str());
@@ -915,6 +915,7 @@ void startWifiMode()
 
   ArduinoOTA.begin();
   Serial.println("📡 OTA ready");
+  checkLatestRelease();
 
   server.on("/ping", []()
             { server.send(200, "application/json", "{\"type\":\"petfeed\"}"); });
