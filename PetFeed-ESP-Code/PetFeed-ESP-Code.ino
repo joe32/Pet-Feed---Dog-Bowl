@@ -1046,14 +1046,18 @@ void startWifiMode()
 
   server.on("/version", HTTP_GET, []()
             {
+    // Serial.println("📥 HTTP /version called");
     StaticJsonDocument<64> doc;
     doc["version"] = FW_VERSION;
     String res;
     serializeJson(doc, res);
+    // Serial.print("📤 Responding with version: ");
+    // Serial.println(FW_VERSION);
     server.send(200, "application/json", res); });
 
   server.on("/check-update", HTTP_GET, []()
             {
+    Serial.println("📥 HTTP /check-update called");
     checkLatestRelease();
 
     StaticJsonDocument<128> doc;
@@ -1071,10 +1075,13 @@ void startWifiMode()
 
     String res;
     serializeJson(doc, res);
+    Serial.print("📤 Update check result: ");
+    Serial.println(doc["status"].as<const char*>());
     server.send(200, "application/json", res); });
 
   server.on("/update", HTTP_POST, []()
             {
+    Serial.println("📥 HTTP /update called");
     if (!otaRunning && otaTaskHandle == nullptr)
     {
       otaStatus = "checking";
@@ -1089,11 +1096,13 @@ void startWifiMode()
         0           // RUN OTA ON CORE 0 (WiFi core), keep loop/server on core 1
       );
     }
+    Serial.println("📤 Update task trigger response sent to app");
     server.send(200, "application/json", "{\"status\":\"started\"}");
 });
 
   server.on("/update-status", HTTP_GET, []()
             {
+    Serial.println("📥 HTTP /update-status called");
     StaticJsonDocument<128> doc;
     doc["status"] = otaStatus;
     doc["progress"] = otaProgress;
@@ -1101,6 +1110,12 @@ void startWifiMode()
 
     String res;
     serializeJson(doc, res);
+    Serial.print("📤 OTA status: ");
+    Serial.print(otaStatus);
+    Serial.print(" | progress: ");
+    Serial.print(otaProgress);
+    Serial.print(" | message: ");
+    Serial.println(otaMessage);
     server.send(200, "application/json", res); });
 
   // ================= UPDATE WIFI (APP) =================

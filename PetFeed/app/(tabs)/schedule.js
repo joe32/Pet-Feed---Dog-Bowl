@@ -17,16 +17,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import React, { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import { useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import * as Notifications from "expo-notifications";
 
-// Match WildPaws notification behaviour (local to this screen)
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-});
 
 
 const STORAGE_KEY = "PETFEED_DEVICES";
@@ -81,50 +72,6 @@ export default function HomeScreen() {
     );
   }, [showPicker]);
   
-  // Notification helpers
-  async function ensureNotificationPermission() {
-    const { status } = await Notifications.getPermissionsAsync();
-    if (status !== "granted") {
-      const req = await Notifications.requestPermissionsAsync();
-      return req.status === "granted";
-    }
-    return true;
-  }
-
-  async function scheduleFeedNotification(date) {
-    try {
-      const { status } = await Notifications.getPermissionsAsync();
-      if (status !== "granted") {
-        const req = await Notifications.requestPermissionsAsync();
-        if (req.status !== "granted") return;
-      }
-
-      // Harden date exactly like WildPaws-style scheduling
-      const fireDate = new Date(date.getTime());
-      fireDate.setSeconds(0);
-      fireDate.setMilliseconds(0);
-
-      const id = await Notifications.scheduleNotificationAsync({
-        content: {
-          title: "PetFeed",
-          body: "Scheduled feed time",
-        },
-        trigger: { date: fireDate },
-      });
-
-      await AsyncStorage.setItem(NOTIFICATION_ID_KEY, id);
-    } catch (e) {
-      console.log("Failed to schedule notification", e);
-    }
-  }
-
-  async function cancelFeedNotification() {
-    const id = await AsyncStorage.getItem(NOTIFICATION_ID_KEY);
-    if (id) {
-      await Notifications.cancelScheduledNotificationAsync(id);
-      await AsyncStorage.removeItem(NOTIFICATION_ID_KEY);
-    }
-  }
 
   async function scheduleFeed() {
     if (!currentDevice || !currentDevice.online) return;
@@ -149,7 +96,6 @@ export default function HomeScreen() {
         notifyDate.setDate(notifyDate.getDate() + 1);
       }
 
-      await scheduleFeedNotification(notifyDate);
       await fetchScheduleState(true);
       await fetchLidState(true);
     } catch (e) {
@@ -164,7 +110,6 @@ export default function HomeScreen() {
       await fetch(`http://${currentDevice.hostname}/CANCEL_SCHEDULE`, {
         method: "POST",
       });
-      await cancelFeedNotification();
       await fetchScheduleState(true);
       await fetchLidState(true);
     } catch (e) {

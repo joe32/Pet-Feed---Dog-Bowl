@@ -1,8 +1,10 @@
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, ActivityIndicator } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl, ActivityIndicator, Platform } from "react-native";
+import DateTimePicker from "@react-native-community/datetimepicker";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useCallback, useEffect, useState } from "react";
 import { useColorScheme } from "react-native";
 import { Colors } from "../../constants/theme";
+import { useLocalSearchParams } from "expo-router";
 
 // const DEV_FAKE_UPDATE = true; // TEMP: remove later
 // const DEV_FAKE_VERSION = "1.2.2"; // TEMP: fake newer version
@@ -12,6 +14,9 @@ const POLL_INTERVAL = 1500;
 export default function UpdatesScreen() {
   const scheme = useColorScheme() ?? "light";
   const colors = Colors[scheme];
+
+  const { host } = useLocalSearchParams();
+  const baseUrl = host ? `http://${host}.local` : null;
 
   const [refreshing, setRefreshing] = useState(false);
   const [checking, setChecking] = useState(false);
@@ -24,10 +29,15 @@ export default function UpdatesScreen() {
 
   const [autoUpdateEnabled, setAutoUpdateEnabled] = useState(false);
   const [preferredTime, setPreferredTime] = useState(null);
+  const [showTimePicker, setShowTimePicker] = useState(false);
   const [savingPrefs, setSavingPrefs] = useState(false);
+  const [lastSavedTime, setLastSavedTime] = useState(null);
+
+  const timeDirty = preferredTime !== lastSavedTime;
+  const canSavePrefs = autoUpdateEnabled && !!preferredTime && timeDirty && !savingPrefs;
 
   async function fetchVersion() {
-    const res = await fetch("/version");
+    const res = await fetch(`${baseUrl}/version`);
     const text = await res.text();
     setCurrentVersion(text);
   }
@@ -40,7 +50,7 @@ export default function UpdatesScreen() {
         return;
       }
 
-      const res = await fetch("/check-update");
+      const res = await fetch(`${baseUrl}/check-update`);
       const text = await res.text();
 
       if (text.toLowerCase().includes("up to date")) {
@@ -56,16 +66,17 @@ export default function UpdatesScreen() {
   }
 
   async function startUpdate() {
+    if (!baseUrl) return;
     setUpdating(true);
     setUpdateStatus({ phase: "starting" });
-    await fetch("/update");
+    await fetch(`${baseUrl}/update`);
     // Start polling for update status after initiating update
     pollUpdateStatus();
   }
 
   async function pollUpdateStatus() {
     try {
-      const res = await fetch("/update-status");
+      const res = await fetch(`${baseUrl}/update-status`);
       const json = await res.json();
       setUpdateStatus(json);
 
@@ -82,16 +93,17 @@ export default function UpdatesScreen() {
 
   async function fetchAutoUpdatePrefs() {
     try {
-      const res = await fetch("/update-preferences");
+      const res = await fetch(`${baseUrl}/update-preferences`);
       const json = await res.json();
       setAutoUpdateEnabled(!!json.enabled);
       setPreferredTime(json.time ?? null);
+      setLastSavedTime(json.time ?? null);
     } catch {}
   }
 
   async function saveAutoUpdatePrefs() {
     setSavingPrefs(true);
-    await fetch("/update-preferences", {
+    await fetch(`${baseUrl}/update-preferences`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -100,9 +112,11 @@ export default function UpdatesScreen() {
       }),
     });
     setSavingPrefs(false);
+    setLastSavedTime(preferredTime);
   }
 
   async function fullRefresh() {
+    if (!baseUrl) return;
     setRefreshing(true);
     await fetchVersion();
     await checkForUpdates();
@@ -111,8 +125,8 @@ export default function UpdatesScreen() {
   }
 
   useEffect(() => {
-    fullRefresh();
-  }, []);
+    if (baseUrl) fullRefresh();
+  }, [baseUrl]);
 
   useEffect(() => {
     if (!updating) return;
@@ -122,7 +136,7 @@ export default function UpdatesScreen() {
 
   const onRefresh = useCallback(async () => {
     await fullRefresh();
-  }, []);
+  }, [baseUrl]);
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.background }}>
@@ -208,7 +222,13 @@ export default function UpdatesScreen() {
           </Text>
 
           <TouchableOpacity
-            onPress={() => setAutoUpdateEnabled(v => !v)}
+            onPress={() => {
+              setAutoUpdateEnabled((v) => {
+                const next = !v;
+                if (!next) setShowTimePicker(false);
+                return next;
+              });
+            }}
             style={{ marginTop: 12, flexDirection: "row", alignItems: "center" }}
           >
             <View
@@ -233,18 +253,60 @@ export default function UpdatesScreen() {
 
           {autoUpdateEnabled && (
             <TouchableOpacity
-              onPress={() => setPreferredTime && setPreferredTime(true)}
+              onPress={() => setShowTimePicker(true)}
               style={{ marginTop: 12 }}
             >
               <Text style={{ color: colors.tint }}>
-                Preferred update time: {preferredTime ?? "Not set"}
+                {preferredTime
+                  ? `Preferred update time: ${preferredTime}`
+                  : "Tap to pick preferred update time"}
               </Text>
             </TouchableOpacity>
           )}
 
+          {showTimePicker && (
+            <View style={{ marginTop: 12 }}>
+              <DateTimePicker
+                value={
+                  preferredTime
+                    ? new Date(`1970-01-01T${preferredTime}:00`)
+                    : new Date()
+                }
+                mode="time"
+                display={Platform.OS === "ios" ? "spinner" : "default"}
+                onChange={(event, selectedDate) => {
+                  // Android fires once; iOS spinner fires continuously.
+                  // Only auto-close on Android.
+                  if (Platform.OS !== "ios") {
+                    setShowTimePicker(false);
+                  }
+                  if (!selectedDate) return;
+                  const hours = String(selectedDate.getHours()).padStart(2, "0");
+                  const minutes = String(selectedDate.getMinutes()).padStart(2, "0");
+                  setPreferredTime(`${hours}:${minutes}`);
+                }}
+              />
+
+              {Platform.OS === "ios" && (
+                <TouchableOpacity
+                  onPress={() => setShowTimePicker(false)}
+                  style={{ alignSelf: "flex-end", paddingVertical: 8, paddingHorizontal: 6 }}
+                >
+                  <Text style={{ color: colors.tint, fontWeight: "600" }}>Done</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+
           <TouchableOpacity
-            style={[styles.primaryButton, { marginTop: 16, opacity: savingPrefs ? 0.5 : 1 }]}
-            disabled={savingPrefs}
+            style={[
+              styles.primaryButton,
+              {
+                marginTop: 16,
+                opacity: canSavePrefs ? 1 : 0.5,
+              },
+            ]}
+            disabled={!canSavePrefs}
             onPress={saveAutoUpdatePrefs}
           >
             <Text style={styles.primaryButtonText}>Save</Text>
