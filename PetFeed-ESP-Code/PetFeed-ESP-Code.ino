@@ -28,7 +28,7 @@
 #include <HTTPClient.h>
 #include <SPIFFS.h>
 
-#define FW_VERSION "1.1.5"
+#define FW_VERSION "1.1.6"
 #define FIRMWARE_DIR "/fw"
 
 String latestBinName = "";
@@ -231,6 +231,8 @@ bool downloadFirmware(const String &binName) {
   HTTPClient http;
   http.begin(url);
   int code = http.GET();
+  int totalSize = http.getSize(); // bytes, may be -1 if unknown
+  unsigned long lastPrintMs = 0;
 
   if (code != HTTP_CODE_OK) {
     Serial.print("❌ HTTP error: ");
@@ -255,6 +257,16 @@ bool downloadFirmware(const String &binName) {
     if (len <= 0) break;
     f.write(buffer, len);
     total += len;
+    if (millis() - lastPrintMs >= 500) {
+      lastPrintMs = millis();
+      float doneMB = total / (1024.0f * 1024.0f);
+      if (totalSize > 0) {
+        float totalMB = totalSize / (1024.0f * 1024.0f);
+        Serial.printf("⬇️ %.2f / %.2f MB\n", doneMB, totalMB);
+      } else {
+        Serial.printf("⬇️ %.2f MB\n", doneMB);
+      }
+    }
   }
 
   f.close();
