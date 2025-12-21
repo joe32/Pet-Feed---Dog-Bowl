@@ -30,6 +30,9 @@
 #define FW_VERSION "1.0.2"
 #define FIRMWARE_DIR "/fw"
 
+String latestBinName = "";
+String latestVersionName = "";
+
 // Track SPIFFS mount state (some environments fail if you call begin() in multiple places)
 bool spiffsMounted = false;
 
@@ -49,6 +52,9 @@ bool ensureSPIFFS() {
 }
 // ================= FIRMWARE SPIFFS HELPERS =================
 void listDownloadedFirmware() {
+  SPIFFS.end();
+  delay(30);
+  SPIFFS.begin(false);
   if (!ensureSPIFFS()) {
     Serial.println("❌ SPIFFS not mounted");
     return;
@@ -120,7 +126,9 @@ bool deleteAllFirmware() {
   }
 
   root.close();
-  SPIFFS.rmdir(FIRMWARE_DIR);
+  SPIFFS.end();
+  delay(50);
+  SPIFFS.begin(true);
   SPIFFS.mkdir(FIRMWARE_DIR);
 
   Serial.println("✅ All firmware deleted");
@@ -128,44 +136,28 @@ bool deleteAllFirmware() {
 }
 
 bool deleteFirmwareByIndex(int targetIndex) {
-  if (!ensureSPIFFS()) {
-    Serial.println("❌ SPIFFS not mounted");
-    return false;
-  }
+  if (!ensureSPIFFS()) return false;
 
-  if (!SPIFFS.exists(FIRMWARE_DIR)) {
-    Serial.println("No firmware directory");
-    return false;
-  }
-
-  File root = SPIFFS.open(FIRMWARE_DIR, FILE_READ);
-  if (!root || !root.isDirectory()) {
-    Serial.println("No firmware directory");
-    return false;
-  }
-
-  int index = 1;
+  std::vector<String> files;
+  File root = SPIFFS.open(FIRMWARE_DIR);
   File file = root.openNextFile();
   while (file) {
     if (!file.isDirectory()) {
-      if (index == targetIndex) {
-        String path = String(FIRMWARE_DIR) + "/" + String(file.name());
-        file.close();
-        bool ok = SPIFFS.remove(path);
-        Serial.print(ok ? "🗑️ Deleted " : "❌ Failed to delete ");
-        Serial.println(path);
-        root.close();
-        return ok;
-      }
-      index++;
+      files.push_back(String(file.name()));
     }
-    file.close();
     file = root.openNextFile();
   }
-
   root.close();
-  Serial.println("❌ Invalid selection");
-  return false;
+
+  if (targetIndex <= 0 || targetIndex > files.size()) {
+    Serial.println("❌ Invalid selection");
+    return false;
+  }
+
+  String path = files[targetIndex - 1];
+  bool ok = SPIFFS.remove(path);
+  Serial.println(ok ? "🗑️ Deleted " + path : "❌ Failed to delete " + path);
+  return ok;
 }
 
 // ==== Install firmware from SPIFFS (OTA) ====
@@ -411,24 +403,50 @@ void checkLatestRelease() {
     return;
   }
 
-  const char *latestVersion = doc["version"];
-  const char *binPath = doc["bin"];
+  latestVersionName = String((const char *)doc["version"]);
+  latestBinName = String((const char *)doc["bin"]);
 
   Serial.print("Latest version: ");
-  Serial.println(latestVersion);
+  Serial.println(latestVersionName);
 
   Serial.print("Latest bin file: ");
-  Serial.println(binPath);
+  Serial.println(latestBinName);
 
   // Compare to your version
   Serial.print("Current version: ");
   Serial.println(FW_VERSION);
 
-  if (String(latestVersion) == String(FW_VERSION)) {
+  if (latestVersionName == String(FW_VERSION)) {
     Serial.println("Already up to date.");
   } else {
     Serial.println("Update available!");
   }
+}
+
+void fullAutoUpdate() {
+  Serial.println("🔎 Checking for latest firmware...");
+  checkLatestRelease();
+
+  if (latestBinName.length() == 0) {
+    Serial.println("❌ No update info available");
+    return;
+  }
+
+  if (latestVersionName == String(FW_VERSION)) {
+    Serial.println("✅ Already on latest firmware");
+    return;
+  }
+
+  Serial.print("⬇️ Downloading ");
+  Serial.println(latestBinName);
+
+  if (!downloadFirmware(latestBinName)) {
+    Serial.println("❌ Download failed");
+    return;
+  }
+
+  Serial.println("📦 Installing downloaded firmware...");
+  installFirmwareFromSPIFFS(1);
 }
 
 void setUKTimezone() {
@@ -1214,8 +1232,11 @@ void loop() {
       ans.trim();
 
       if (ans == "y" || ans == "Y") {
-        String bin = "PetFeed-v1.0.1.bin";
-        downloadFirmware(bin);
+        if (latestBinName.length() == 0) {
+          Serial.println("❌ No latest firmware info available");
+        } else {
+          downloadFirmware(latestBinName);
+        }
       } else {
         Serial.println("❎ Download cancelled");
       }
@@ -1254,6 +1275,10 @@ void loop() {
       } else {
         Serial.println("❌ Invalid choice");
       }
+    }
+
+    if (cmd == "update") {
+      fullAutoUpdate();
     }
 
     if (cmd == "open") moveLidOpen();
