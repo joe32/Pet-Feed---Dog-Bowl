@@ -28,7 +28,7 @@
 #include <HTTPClient.h>
 #include <SPIFFS.h>
 
-#define FW_VERSION "1.1.3"
+#define FW_VERSION "1.1.4"
 #define FIRMWARE_DIR "/fw"
 
 String latestBinName = "";
@@ -383,20 +383,57 @@ void fullAutoUpdate() {
     return;
   }
 
-  Serial.print("⬇️ Downloading ");
-  Serial.println(latestBinName);
+  // Store latestBinName in a local variable
+  String downloadedBin = latestBinName;
 
-  if (!downloadFirmware(latestBinName)) {
+  Serial.print("⬇️ Downloading ");
+  Serial.println(downloadedBin);
+
+  if (!downloadFirmware(downloadedBin)) {
     Serial.println("❌ Download failed");
     return;
   }
 
-  std::vector<String> files;
-  if (collectFirmwareFiles(files) == 0) {
-    Serial.println("❌ No firmware found after download");
+  // Find the index of the downloaded firmware
+  int foundIndex = findFirmwareIndexByName(downloadedBin);
+  if (foundIndex == -1) {
+    Serial.println("❌ Downloaded firmware file not found in SPIFFS");
     return;
   }
-  installFirmwareFromSPIFFS(1);
+  installFirmwareFromSPIFFS(foundIndex);
+}
+// Helper: Find firmware index by name (1-based for installFirmwareFromSPIFFS)
+int findFirmwareIndexByName(const String &binName) {
+  std::vector<String> files;
+  int count = collectFirmwareFiles(files);
+  if (count == 0) return -1;
+
+  for (int i = 0; i < files.size(); i++) {
+    if (files[i].endsWith(binName)) {
+      return i + 1; // installFirmwareFromSPIFFS is 1-based
+    }
+  }
+  return -1;
+}
+// Helper: Remove all firmware except current version
+void cleanupFirmwareExceptCurrent() {
+  if (!ensureSPIFFS()) return;
+
+  std::vector<String> files;
+  int count = collectFirmwareFiles(files);
+  if (count == 0) return;
+
+  for (auto &path : files) {
+    String name = path;
+    if (name.startsWith(FIRMWARE_DIR "/")) {
+      name.remove(0, strlen(FIRMWARE_DIR) + 1);
+    }
+
+    if (!name.endsWith(String(FW_VERSION) + ".bin")) {
+      SPIFFS.remove(path);
+      Serial.println("🧹 Removed old firmware: " + name);
+    }
+  }
 }
 
 void setUKTimezone() {
@@ -1075,6 +1112,9 @@ void setup() {
     }
     Serial.println("📁 SPIFFS ready");
   }
+
+  // Clean up old firmware except current before checking deviceMode
+  cleanupFirmwareExceptCurrent();
 
   prefs.begin("petfeed", true);
   deviceMode = prefs.getString("mode", "ble");
