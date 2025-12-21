@@ -28,7 +28,7 @@
 #include <HTTPClient.h>
 #include <SPIFFS.h>
 
-#define FW_VERSION "1.2.0"
+#define FW_VERSION "1.2.3"
 #define FIRMWARE_DIR "/fw"
 
 String latestBinName = "";
@@ -38,6 +38,9 @@ String latestVersionName = "";
 String otaStatus = "idle"; // idle | checking | downloading | installing | done | error
 String otaProgress = "";   // e.g. "0.42/1.56 MB"
 String otaMessage = "";    // human-readable status
+
+bool otaRequested = false;
+bool otaRunning = false;
 
 // Track SPIFFS mount state (some environments fail if you call begin() in multiple places)
 bool spiffsMounted = false;
@@ -1039,9 +1042,11 @@ void startWifiMode()
 
   server.on("/update", HTTP_POST, []()
             {
+    otaRequested = true;
+    otaStatus = "checking";
+    otaMessage = "Update requested";
     server.send(200, "application/json", "{\"status\":\"started\"}");
-    delay(200);
-    fullAutoUpdate(); });
+});
 
   server.on("/update-status", HTTP_GET, []()
             {
@@ -1566,6 +1571,17 @@ void loop()
         delay(1000);
       }
     }
+  }
+
+  // ================= OTA BACKGROUND EXECUTION =================
+  if (otaRequested && !otaRunning)
+  {
+    otaRunning = true;
+    otaRequested = false;
+
+    fullAutoUpdate();
+
+    otaRunning = false;
   }
 
   // Print time once per minute, exactly at :00 seconds (non-blocking)

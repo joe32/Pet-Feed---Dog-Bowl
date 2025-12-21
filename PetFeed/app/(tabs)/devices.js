@@ -37,13 +37,14 @@ async function pingHost(host) {
   try {
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), 2000);
-    const res = await fetch(`http://${host}.local/ping`, {
-      signal: controller.signal,
-    });
+    const res = await fetch(`http://${host}.local/ping`, { signal: controller.signal });
+    if (!res.ok) throw new Error();
+    const vRes = await fetch(`http://${host}.local/version`, { signal: controller.signal });
     clearTimeout(t);
-    return res.ok;
+    const vJson = await vRes.json();
+    return { online: true, firmware: vJson.version };
   } catch {
-    return false;
+    return { online: false, firmware: undefined };
   }
 }
 
@@ -178,8 +179,8 @@ export default function DevicesScreen() {
       const updated = await Promise.all(
         devices.map(async (d) => {
           if (!d.host) return d;
-          const online = await pingHost(d.host);
-          return { ...d, online };
+          const result = await pingHost(d.host);
+          return { ...d, online: result.online, firmware: result.firmware };
         })
       );
       setDevices(updated);
@@ -193,8 +194,8 @@ export default function DevicesScreen() {
     const updated = await Promise.all(
       devices.map(async (d) => {
         if (!d.host) return d;
-        const online = await pingHost(d.host);
-        return { ...d, online };
+        const result = await pingHost(d.host);
+        return { ...d, online: result.online, firmware: result.firmware };
       })
     );
     setDevices(updated);
@@ -289,6 +290,15 @@ export default function DevicesScreen() {
           );
         },
       },
+      {
+        text: "Updates",
+        onPress: () => {
+          router.push({
+            pathname: "/(device-setup)/updates",
+            params: { host: device.host, name: device.name },
+          });
+        },
+      },
       // Only render Edit Wi‑Fi for non-local devices
       ...(device.mode !== "local"
         ? [
@@ -353,7 +363,7 @@ Hostname (mDNS): ${device.host}.local
 Connection: ${device.mode === "local" ? "Local device" : "Wi‑Fi (local)"}
 Mode: ${device.mode}
 Status: ${device.online ? "Online" : "Offline"}
-IP Address: Unknown`,
+Firmware: ${device.firmware || "Unknown"}`,
             [{ text: "OK" }]
           );
         },
