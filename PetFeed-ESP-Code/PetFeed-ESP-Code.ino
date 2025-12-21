@@ -37,24 +37,24 @@ String latestVersionName = "";
 bool spiffsMounted = false;
 
 bool ensureSPIFFS() {
-  // Always (re)mount SPIFFS when called.
-  // BLE / OTA / Wi‑Fi transitions can invalidate the mount on ESP32.
-  SPIFFS.end();
-  delay(50);
+  if (spiffsMounted) return true;
 
-  if (SPIFFS.begin(true)) {
-    spiffsMounted = true;
-    return true;
+  if (!SPIFFS.begin(false)) {
+    Serial.println("❌ SPIFFS mount failed");
+    spiffsMounted = false;
+    return false;
   }
 
-  spiffsMounted = false;
-  return false;
+  spiffsMounted = true;
+
+  if (!SPIFFS.exists(FIRMWARE_DIR)) {
+    SPIFFS.mkdir(FIRMWARE_DIR);
+  }
+
+  return true;
 }
 // ================= FIRMWARE SPIFFS HELPERS =================
 void listDownloadedFirmware() {
-  SPIFFS.end();
-  delay(30);
-  SPIFFS.begin(false);
   if (!ensureSPIFFS()) {
     Serial.println("❌ SPIFFS not mounted");
     return;
@@ -126,10 +126,6 @@ bool deleteAllFirmware() {
   }
 
   root.close();
-  SPIFFS.end();
-  delay(50);
-  SPIFFS.begin(true);
-  SPIFFS.mkdir(FIRMWARE_DIR);
 
   Serial.println("✅ All firmware deleted");
   return true;
@@ -1116,7 +1112,7 @@ void setup() {
   currentAngle = LID_CLOSED;
   Serial.println("🔒 Lid forced closed on startup");
 
-  if (!SPIFFS.begin(true)) {
+  if (!SPIFFS.begin(false)) {
     Serial.println("❌ SPIFFS mount failed at boot");
   } else {
     spiffsMounted = true;
