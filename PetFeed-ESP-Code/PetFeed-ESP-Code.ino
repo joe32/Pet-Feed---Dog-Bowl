@@ -44,6 +44,12 @@ bool otaRunning = false;
 TaskHandle_t otaTaskHandle = nullptr;
 TaskHandle_t serverTaskHandle = nullptr;
 
+// ===== AUTO UPDATE PREFS =====
+bool autoUpdateEnabled = false;
+int preferredUpdateHour = -1;
+int preferredUpdateMinute = -1;
+unsigned long lastAutoUpdateCheckMs = 0;
+
 // Track SPIFFS mount state (some environments fail if you call begin() in multiple places)
 bool spiffsMounted = false;
 
@@ -701,6 +707,25 @@ void loadSchedule()
   prefs.end();
 }
 
+// ================= AUTO UPDATE PREFS =================
+void saveAutoUpdatePrefs()
+{
+  prefs.begin("petfeed", false);
+  prefs.putBool("autoUpd", autoUpdateEnabled);
+  prefs.putInt("updHour", preferredUpdateHour);
+  prefs.putInt("updMin", preferredUpdateMinute);
+  prefs.end();
+}
+
+void loadAutoUpdatePrefs()
+{
+  prefs.begin("petfeed", true);
+  autoUpdateEnabled = prefs.getBool("autoUpd", false);
+  preferredUpdateHour = prefs.getInt("updHour", -1);
+  preferredUpdateMinute = prefs.getInt("updMin", -1);
+  prefs.end();
+}
+
 // ================= HELPER: NOTIFY SCHEDULE =================
 void notifySchedule()
 {
@@ -1054,6 +1079,62 @@ void startWifiMode()
     // Serial.print("📤 Responding with version: ");
     // Serial.println(FW_VERSION);
     server.send(200, "application/json", res); });
+
+  // ===== AUTO UPDATE PREFS (APP) =====
+
+  // Get auto-update preferences
+  server.on("/update-prefs", HTTP_GET, []()
+  {
+    StaticJsonDocument<128> doc;
+    doc["enabled"] = autoUpdateEnabled;
+    if (preferredUpdateHour >= 0 && preferredUpdateMinute >= 0)
+    {
+      char buf[6];
+      sprintf(buf, "%02d:%02d", preferredUpdateHour, preferredUpdateMinute);
+      doc["time"] = buf;
+    }
+    else
+    {
+      doc["time"] = "";
+    }
+
+    String res;
+    serializeJson(doc, res);
+    server.send(200, "application/json", res);
+  });
+
+  // Save auto-update preferences
+  server.on("/update-prefs", HTTP_POST, []()
+  {
+    if (!server.hasArg("plain"))
+    {
+      server.send(400, "text/plain", "no body");
+      return;
+    }
+
+    StaticJsonDocument<128> doc;
+    if (deserializeJson(doc, server.arg("plain")))
+    {
+      server.send(400, "text/plain", "bad json");
+      return;
+    }
+
+    autoUpdateEnabled = doc["enabled"] | false;
+
+    String time = doc["time"] | "";
+    if (time.length())
+    {
+      int colon = time.indexOf(":");
+      if (colon > 0)
+      {
+        preferredUpdateHour = time.substring(0, colon).toInt();
+        preferredUpdateMinute = time.substring(colon + 1).toInt();
+      }
+    }
+
+    saveAutoUpdatePrefs();
+    server.send(200, "application/json", "{\"status\":\"saved\"}");
+  });
 
   server.on("/check-update", HTTP_GET, []()
             {
@@ -1438,6 +1519,7 @@ void setup()
   prefs.end();
 
   loadSchedule();
+  loadAutoUpdatePrefs();
 
   if (deviceMode == "wifi" && wifiSSID.length())
   {

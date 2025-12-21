@@ -11,6 +11,28 @@ import { useLocalSearchParams } from "expo-router";
 
 const POLL_INTERVAL = 1500;
 
+async function fetchWithTimeout(url, options = {}, timeoutMs = 2500) {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(t);
+  }
+}
+
+async function tryJson(res) {
+  const ct = (res.headers.get("content-type") || "").toLowerCase();
+  if (ct.includes("application/json")) return await res.json();
+  // Some ESP handlers may not set content-type correctly
+  const text = await res.text();
+  try {
+    return JSON.parse(text);
+  } catch {
+    return text;
+  }
+}
+
 export default function UpdatesScreen() {
   const scheme = useColorScheme() ?? "light";
   const colors = Colors[scheme];
@@ -23,7 +45,7 @@ export default function UpdatesScreen() {
   const [updating, setUpdating] = useState(false);
 
   const [currentVersion, setCurrentVersion] = useState(null);
-  const [updateInfo, setUpdateInfo] = useState(null); // { status: 'up-to-date' | 'available', version }
+  const [updateInfo, setUpdateInfo] = useState(null); // { status: 'up-to-date' | 'update-available', latest }
 
   const [updateStatus, setUpdateStatus] = useState(null); // { phase, downloadedMb, totalMb }
 
@@ -33,32 +55,66 @@ export default function UpdatesScreen() {
   const [savingPrefs, setSavingPrefs] = useState(false);
   const [lastSavedTime, setLastSavedTime] = useState(null);
 
-  const timeDirty = preferredTime !== lastSavedTime;
-  const canSavePrefs = autoUpdateEnabled && !!preferredTime && timeDirty && !savingPrefs;
+  const enabledDirty = autoUpdateEnabled !== (lastSavedTime === "__enabled:false__" ? false : true);
+  const timeDirty = preferredTime !== (lastSavedTime === "__enabled:false__" ? null : lastSavedTime);
+  const prefsDirty = enabledDirty || timeDirty;
+  const canSavePrefs =
+    prefsDirty &&
+    !savingPrefs &&
+    // If enabling auto updates, a time is required
+    (!autoUpdateEnabled || !!preferredTime);
 
   async function fetchVersion() {
-    const res = await fetch(`${baseUrl}/version`);
-    const text = await res.text();
-    setCurrentVersion(text);
+    if (!baseUrl) return;
+    try {
+      console.log("[updates] GET /version", `${baseUrl}/version`);
+      const res = await fetchWithTimeout(`${baseUrl}/version`, {}, 2500);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await tryJson(res);
+      const v = typeof data?.version === "string" ? data.version : null;
+      setCurrentVersion(v);
+    } catch (e) {
+      console.log("[updates] /version failed", String(e));
+      setCurrentVersion(null);
+    }
   }
 
   async function checkForUpdates() {
+    if (!baseUrl) return;
     setChecking(true);
     try {
-      if (DEV_FAKE_UPDATE) {
-        setUpdateInfo({ status: "available", version: DEV_FAKE_VERSION });
+      console.log("[updates] GET /check-update", `${baseUrl}/check-update`);
+
+      // Prefer JSON
+      const res = await fetchWithTimeout(`${baseUrl}/check-update`, {}, 4000);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await tryJson(res);
+
+      // Expected ESP JSON (recommended):
+      // { status: "up-to-date" } OR { status: "update-available", latest: "1.2.4" }
+      if (typeof data === "object" && data) {
+        if (data.status === "up-to-date" || data.status === "update-available") {
+          setUpdateInfo(data);
+        } else if (typeof data.version === "string") {
+          // fallback
+          setUpdateInfo({ status: "update-available", latest: data.version });
+        } else {
+          setUpdateInfo(null);
+        }
         return;
       }
 
-      const res = await fetch(`${baseUrl}/check-update`);
-      const text = await res.text();
-
+      // If ESP returned plain text
+      const text = String(data || "");
       if (text.toLowerCase().includes("up to date")) {
         setUpdateInfo({ status: "up-to-date" });
+      } else if (text.trim()) {
+        setUpdateInfo({ status: "update-available", latest: text.trim() });
       } else {
-        setUpdateInfo({ status: "available", version: text });
+        setUpdateInfo(null);
       }
     } catch (e) {
+      console.log("[updates] /check-update failed", String(e));
       setUpdateInfo(null);
     } finally {
       setChecking(false);
@@ -92,27 +148,65 @@ export default function UpdatesScreen() {
   }
 
   async function fetchAutoUpdatePrefs() {
+    if (!baseUrl) return;
     try {
-      const res = await fetch(`${baseUrl}/update-preferences`);
-      const json = await res.json();
-      setAutoUpdateEnabled(!!json.enabled);
-      setPreferredTime(json.time ?? null);
-      setLastSavedTime(json.time ?? null);
-    } catch {}
+      console.log("[updates] GET /update-prefs", `${baseUrl}/update-prefs`);
+      let res = await fetchWithTimeout(`${baseUrl}/update-prefs`, {}, 3000);
+      if (!res.ok) {
+        console.log("[updates] /update-prefs failed, trying /update-preferences");
+        res = await fetchWithTimeout(`${baseUrl}/update-preferences`, {}, 3000);
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await tryJson(res);
+
+      const enabled = !!json?.enabled;
+      const time = typeof json?.time === "string" ? json.time : null; // "HH:MM" or null
+
+      setAutoUpdateEnabled(enabled);
+      setPreferredTime(time);
+
+      // We pack the enabled baseline into lastSavedTime so we can detect enabled changes without adding new state.
+      // If enabled is false, store a sentinel.
+      setLastSavedTime(enabled ? time : "__enabled:false__");
+    } catch (e) {
+      console.log("[updates] prefs fetch failed", String(e));
+    }
   }
 
   async function saveAutoUpdatePrefs() {
+    if (!baseUrl) return;
     setSavingPrefs(true);
-    await fetch(`${baseUrl}/update-preferences`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    try {
+      const body = JSON.stringify({
         enabled: autoUpdateEnabled,
-        time: preferredTime,
-      }),
-    });
-    setSavingPrefs(false);
-    setLastSavedTime(preferredTime);
+        time: autoUpdateEnabled ? preferredTime : null,
+      });
+
+      console.log("[updates] POST /update-prefs", body);
+      let res = await fetchWithTimeout(`${baseUrl}/update-prefs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body,
+      }, 5000);
+
+      if (!res.ok) {
+        console.log("[updates] /update-prefs failed, trying /update-preferences");
+        res = await fetchWithTimeout(`${baseUrl}/update-preferences`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body,
+        }, 5000);
+      }
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      // Update baseline after save
+      setLastSavedTime(autoUpdateEnabled ? preferredTime : "__enabled:false__");
+    } catch (e) {
+      console.log("[updates] save prefs failed", String(e));
+    } finally {
+      setSavingPrefs(false);
+    }
   }
 
   async function fullRefresh() {
@@ -149,7 +243,7 @@ export default function UpdatesScreen() {
         <View style={[styles.card, { backgroundColor: colors.card }]}>
           <Text style={[styles.label, { color: colors.textSecondary }]}>CURRENT FIRMWARE</Text>
           <Text style={[styles.value, { color: colors.text }]}>
-            {currentVersion ?? "—"}
+            {currentVersion ? `v${currentVersion}` : "—"}
           </Text>
         </View>
 
@@ -159,11 +253,11 @@ export default function UpdatesScreen() {
               <ActivityIndicator />
             ) : updateInfo?.status === "up-to-date" ? (
               <Text style={{ color: colors.text }}>Already up to date</Text>
-            ) : updateInfo?.status === "available" ? (
+            ) : updateInfo?.status === "update-available" ? (
               <View>
                 <Text style={[styles.updateTitle, { color: colors.text }]}>New Update Available</Text>
                 <Text style={{ color: colors.textSecondary }}>
-                  Version {updateInfo.version}
+                  Version {updateInfo.latest}
                 </Text>
 
                 <TouchableOpacity style={styles.primaryButton} onPress={startUpdate}>
@@ -253,13 +347,14 @@ export default function UpdatesScreen() {
 
           {autoUpdateEnabled && (
             <TouchableOpacity
-              onPress={() => setShowTimePicker(true)}
+              onPress={() => setShowTimePicker((v) => !v)}
               style={{ marginTop: 12 }}
+              activeOpacity={0.8}
             >
-              <Text style={{ color: colors.tint }}>
+              <Text style={{ color: colors.tint, fontWeight: "600" }}>
                 {preferredTime
-                  ? `Preferred update time: ${preferredTime}`
-                  : "Tap to pick preferred update time"}
+                  ? `Preferred update time: ${preferredTime}  (tap to change)`
+                  : "Tap here to pick your preferred update time"}
               </Text>
             </TouchableOpacity>
           )}
