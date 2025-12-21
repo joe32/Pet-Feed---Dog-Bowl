@@ -27,37 +27,243 @@
 #include <HTTPClient.h>
 #include <SPIFFS.h>
 
-#define FW_VERSION "1.0.1"
+#define FW_VERSION "1.0.2"
 #define FIRMWARE_DIR "/fw"
+
+// Track SPIFFS mount state (some environments fail if you call begin() in multiple places)
+bool spiffsMounted = false;
+
+bool ensureSPIFFS() {
+  // Always (re)mount SPIFFS when called.
+  // BLE / OTA / Wi‑Fi transitions can invalidate the mount on ESP32.
+  SPIFFS.end();
+  delay(50);
+
+  if (SPIFFS.begin(true)) {
+    spiffsMounted = true;
+    return true;
+  }
+
+  spiffsMounted = false;
+  return false;
+}
 // ================= FIRMWARE SPIFFS HELPERS =================
 void listDownloadedFirmware() {
-  File root = SPIFFS.open(FIRMWARE_DIR);
-  if (!root || !root.isDirectory()) {
-    Serial.println("No firmware directory");
+  if (!ensureSPIFFS()) {
+    Serial.println("❌ SPIFFS not mounted");
     return;
   }
 
-  int index = 1;
-  File file = root.openNextFile();
-  if (!file) {
+  if (!SPIFFS.exists(FIRMWARE_DIR)) {
+    Serial.println("No downloaded firmware found");
+    return;
+  }
+
+  File root = SPIFFS.open(FIRMWARE_DIR, FILE_READ);
+  if (!root || !root.isDirectory()) {
     Serial.println("No downloaded firmware found");
     return;
   }
 
   Serial.println("Downloaded firmware:");
+  int index = 1;
+  bool found = false;
+
+  File file = root.openNextFile();
   while (file) {
-    Serial.printf("%d. %s (%d bytes)\n", index++, file.name(), file.size());
+    if (!file.isDirectory()) {
+      Serial.printf("%d. %s (%d bytes)\n",
+                    index++,
+                    file.name(),
+                    file.size());
+      found = true;
+    }
+    file.close();
     file = root.openNextFile();
+  }
+
+  if (!found) {
+    Serial.println("No downloaded firmware found");
   }
 }
 
-bool downloadFirmware(const String &binName) {
+// ====== FIRMWARE DELETE HELPERS ======
+bool deleteAllFirmware() {
+  if (!ensureSPIFFS()) {
+    Serial.println("❌ SPIFFS not mounted");
+    return false;
+  }
+
   if (!SPIFFS.exists(FIRMWARE_DIR)) {
-    Serial.println("📁 Firmware dir missing, creating...");
+    Serial.println("No firmware directory to delete");
+    return false;
+  }
+
+  File root = SPIFFS.open(FIRMWARE_DIR, FILE_READ);
+  if (!root || !root.isDirectory()) {
+    Serial.println("Firmware path is not a directory");
+    return false;
+  }
+
+  File file = root.openNextFile();
+  while (file) {
+    if (!file.isDirectory()) {
+      String path = String(FIRMWARE_DIR) + "/" + String(file.name());
+      file.close();
+      SPIFFS.remove(path);
+      Serial.print("🗑️ Deleted ");
+      Serial.println(path);
+    } else {
+      file.close();
+    }
+    file = root.openNextFile();
+  }
+
+  root.close();
+  SPIFFS.rmdir(FIRMWARE_DIR);
+  SPIFFS.mkdir(FIRMWARE_DIR);
+
+  Serial.println("✅ All firmware deleted");
+  return true;
+}
+
+bool deleteFirmwareByIndex(int targetIndex) {
+  if (!ensureSPIFFS()) {
+    Serial.println("❌ SPIFFS not mounted");
+    return false;
+  }
+
+  if (!SPIFFS.exists(FIRMWARE_DIR)) {
+    Serial.println("No firmware directory");
+    return false;
+  }
+
+  File root = SPIFFS.open(FIRMWARE_DIR, FILE_READ);
+  if (!root || !root.isDirectory()) {
+    Serial.println("No firmware directory");
+    return false;
+  }
+
+  int index = 1;
+  File file = root.openNextFile();
+  while (file) {
+    if (!file.isDirectory()) {
+      if (index == targetIndex) {
+        String path = String(FIRMWARE_DIR) + "/" + String(file.name());
+        file.close();
+        bool ok = SPIFFS.remove(path);
+        Serial.print(ok ? "🗑️ Deleted " : "❌ Failed to delete ");
+        Serial.println(path);
+        root.close();
+        return ok;
+      }
+      index++;
+    }
+    file.close();
+    file = root.openNextFile();
+  }
+
+  root.close();
+  Serial.println("❌ Invalid selection");
+  return false;
+}
+
+// ==== Install firmware from SPIFFS (OTA) ====
+bool installFirmwareFromSPIFFS(int targetIndex) {
+  if (!ensureSPIFFS()) {
+    Serial.println("❌ SPIFFS not mounted");
+    return false;
+  }
+
+  if (!SPIFFS.exists(FIRMWARE_DIR)) {
+    Serial.println("No firmware directory");
+    return false;
+  }
+
+  File root = SPIFFS.open(FIRMWARE_DIR, FILE_READ);
+  if (!root || !root.isDirectory()) {
+    Serial.println("No firmware directory");
+    return false;
+  }
+
+  int index = 1;
+  File file = root.openNextFile();
+  while (file) {
+    if (!file.isDirectory()) {
+      if (index == targetIndex) {
+        Serial.print("🚀 Installing ");
+        Serial.println(file.name());
+
+        size_t size = file.size();
+        if (!Update.begin(size)) {
+          Serial.println("❌ Update begin failed");
+          file.close();
+          root.close();
+          return false;
+        }
+
+        size_t written = 0;
+        uint8_t buf[1024];
+        int lastPct = -1;
+
+        while (file.available()) {
+          int len = file.read(buf, sizeof(buf));
+          if (len <= 0) break;
+
+          Update.write(buf, len);
+          written += len;
+
+          int pct = (written * 100) / size;
+          if (pct != lastPct) {
+            lastPct = pct;
+            Serial.printf("📦 Install %d%%\n", pct);
+          }
+        }
+
+        file.close();
+        root.close();
+
+        if (!Update.end(true)) {
+          Serial.print("❌ Update failed: ");
+          Serial.println(Update.errorString());
+          return false;
+        }
+
+        Serial.println("✅ Firmware installed successfully");
+        Serial.println("🔁 Rebooting...");
+        delay(500);
+        ESP.restart();
+        return true;
+      }
+      index++;
+    }
+    file.close();
+    file = root.openNextFile();
+  }
+
+  root.close();
+  Serial.println("❌ Invalid selection");
+  return false;
+}
+
+bool downloadFirmware(const String &binName) {
+  if (!ensureSPIFFS()) {
+    Serial.println("❌ SPIFFS not mounted");
+    return false;
+  }
+
+  if (!SPIFFS.exists(FIRMWARE_DIR)) {
     SPIFFS.mkdir(FIRMWARE_DIR);
   }
-  String url = String("https://raw.githubusercontent.com/joe32/Pet-Feed---Dog-Bowl/main/PetFeed-ESP-Code/Firmware/")
-               + binName + "?t=" + String(millis());
+
+  String cleanName = binName;
+  if (cleanName.startsWith("/")) cleanName.remove(0, 1);
+
+  String localPath = String(FIRMWARE_DIR) + "/" + cleanName;
+
+  String url =
+    String("https://raw.githubusercontent.com/joe32/Pet-Feed---Dog-Bowl/main/PetFeed-ESP-Code/Firmware/")
+    + cleanName + "?t=" + String(millis());
 
   Serial.print("⬇️ Downloading ");
   Serial.println(url);
@@ -67,13 +273,20 @@ bool downloadFirmware(const String &binName) {
   int code = http.GET();
 
   if (code != HTTP_CODE_OK) {
-    Serial.print("HTTP error: ");
+    Serial.print("❌ HTTP error: ");
     Serial.println(code);
     http.end();
     return false;
   }
 
-  File f = SPIFFS.open(String(FIRMWARE_DIR) + "/" + binName, FILE_WRITE);
+  int totalSize = http.getSize();
+  if (totalSize <= 0) {
+    Serial.println("❌ Invalid content length");
+    http.end();
+    return false;
+  }
+
+  File f = SPIFFS.open(localPath, FILE_WRITE);
   if (!f) {
     Serial.println("❌ Failed to open file for writing");
     http.end();
@@ -81,20 +294,35 @@ bool downloadFirmware(const String &binName) {
   }
 
   WiFiClient *stream = http.getStreamPtr();
-  uint8_t buf[512];
-  int total = 0;
+  uint8_t buffer[1024];
+  int written = 0;
+  int lastPct = -1;
 
-  while (http.connected()) {
-    int len = stream->readBytes(buf, sizeof(buf));
+  while (http.connected() && written < totalSize) {
+    int len = stream->readBytes(buffer, sizeof(buffer));
     if (len <= 0) break;
-    f.write(buf, len);
-    total += len;
+
+    f.write(buffer, len);
+    written += len;
+
+    int pct = (written * 100) / totalSize;
+    if (pct != lastPct) {
+      lastPct = pct;
+      Serial.printf("📥 Download %d%%\n", pct);
+    }
   }
 
   f.close();
   http.end();
 
-  Serial.printf("✅ Download complete (%d bytes)\n", total);
+  if (written != totalSize) {
+    Serial.println("❌ Download incomplete");
+    SPIFFS.remove(localPath);
+    return false;
+  }
+
+  Serial.printf("✅ Download complete: %s (%d bytes)\n",
+                cleanName.c_str(), written);
   return true;
 }
 
@@ -871,8 +1099,9 @@ void setup() {
   Serial.println("🔒 Lid forced closed on startup");
 
   if (!SPIFFS.begin(true)) {
-    Serial.println("❌ SPIFFS mount failed");
+    Serial.println("❌ SPIFFS mount failed at boot");
   } else {
+    spiffsMounted = true;
     if (!SPIFFS.exists(FIRMWARE_DIR)) {
       SPIFFS.mkdir(FIRMWARE_DIR);
     }
@@ -992,16 +1221,39 @@ void loop() {
       }
     }
 
-    if (cmd == "install") {
+    if (cmd == "delete") {
       listDownloadedFirmware();
-      Serial.println("Type number to install (fake install)");
+      Serial.println("0. Delete ALL firmware");
+      Serial.println("Type number to delete");
+
       while (!Serial.available()) delay(10);
       String sel = Serial.readStringUntil('\n');
       sel.trim();
 
-      Serial.print("Installing firmware option ");
-      Serial.println(sel);
-      Serial.println("⚠️ Fake install only (no OTA yet)");
+      int choice = sel.toInt();
+
+      if (choice == 0) {
+        deleteAllFirmware();
+      } else if (choice > 0) {
+        deleteFirmwareByIndex(choice);
+      } else {
+        Serial.println("❌ Invalid choice");
+      }
+    }
+
+    if (cmd == "install") {
+      listDownloadedFirmware();
+      Serial.println("Type number to install");
+      while (!Serial.available()) delay(10);
+      String sel = Serial.readStringUntil('\n');
+      sel.trim();
+
+      int choice = sel.toInt();
+      if (choice > 0) {
+        installFirmwareFromSPIFFS(choice);
+      } else {
+        Serial.println("❌ Invalid choice");
+      }
     }
 
     if (cmd == "open") moveLidOpen();
