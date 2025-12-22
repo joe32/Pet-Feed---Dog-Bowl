@@ -1033,6 +1033,17 @@ class ClaimServerCallbacks : public BLEServerCallbacks {
     BLEDevice::startAdvertising();
   }
 };
+void startCloudMode() {
+  Serial.println("☁️ CLOUD MODE: initialising");
+
+  // Cloud mode ALWAYS relies on Wi‑Fi mode underneath
+  Serial.println("☁️ CLOUD MODE: starting Wi‑Fi subsystem");
+  startWifiMode();
+
+  // Placeholder for future cloud connection (MQTT / HTTPS)
+  Serial.println("☁️ CLOUD MODE: Wi‑Fi ready, cloud layer not yet implemented");
+}
+
 void startWifiMode() {
   Serial.println("📡 Wi-Fi mode");
 
@@ -1837,7 +1848,14 @@ void setup() {
   loadAutoUpdatePrefs();
   loadBuzzerPrefs();
 
+  if (deviceMode == "cloud" && wifiSSID.length()) {
+    Serial.println("☁️ Device mode = CLOUD");
+    startCloudMode();
+    return;
+  }
+
   if (deviceMode == "wifi" && wifiSSID.length()) {
+    Serial.println("📡 Device mode = WIFI");
     startWifiMode();
     return;
   }

@@ -81,9 +81,9 @@ export default function AddDeviceScreen() {
   // (REMOVED: auto-start Wi-Fi scan when modal appears)
 
   // TEMP: force connection mode popup on load (REMOVE AFTER TESTING)
-  // useEffect(() => {
-  //   setSetupStep("mode");
-  // }, []);
+  useEffect(() => {
+    setSetupStep("mode");
+  }, []);
 
   async function scanWifiNetworks() {
     // Bump sequence so older scans are ignored
@@ -472,7 +472,12 @@ export default function AddDeviceScreen() {
                 ]}
                 disabled={!connectionMode}
                 onPress={() => {
-                  // Both Wi‑Fi and Cloud go through the SAME Wi‑Fi setup flow
+                  console.log("[SETUP] Connection mode selected:", connectionMode);
+
+                  // Persist chosen connection mode for later steps
+                  setConnectionMode(connectionMode);
+
+                  // Continue to Wi‑Fi setup for BOTH modes
                   setSetupStep("wifi");
                   scanWifiNetworks();
                 }}
@@ -736,10 +741,13 @@ export default function AddDeviceScreen() {
                   // Give ESP time to reboot before navigation
                   await new Promise((r) => setTimeout(r, 300));
 
+                  const finalMode = connectionMode === "cloud" ? "Cloud" : "Wi‑Fi (local)";
+                  console.log("[SETUP] Final device mode being saved:", finalMode);
+
                   await saveDeviceAndReturn(
                     pendingDevice,
                     deviceName,
-                    "Wi‑Fi (local)",
+                    finalMode,
                     ssid
                   );
                 }}
