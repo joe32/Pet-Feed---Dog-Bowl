@@ -136,8 +136,17 @@ export default function AddDeviceScreen() {
   const wifiAbortRef = useRef(null);
   const wifiActiveSeqRef = useRef(0);
 
+  // Android-only: prevent setState after unmount (can crash on some devices)
+  const isMountedRef = useRef(true);
+  const safeSet = (fn) => {
+    if (Platform.OS === "android" && !isMountedRef.current) return;
+    fn();
+  };
+
   useEffect(() => {
     return () => {
+      isMountedRef.current = false;
+
       stopScan();
       if (timeoutRef.current) {
         clearTimeout(timeoutRef.current);
