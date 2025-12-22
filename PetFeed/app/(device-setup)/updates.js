@@ -51,6 +51,30 @@ export default function UpdatesScreen() {
 
   const [currentVersion, setCurrentVersion] = useState(null);
   const [updateInfo, setUpdateInfo] = useState(null); // { status: 'up-to-date' | 'update-available', latest }
+  const [scheduledUpdate, setScheduledUpdate] = useState(null); 
+  // { scheduled: boolean, time: string, latest: string }
+  async function fetchUpdateSchedule() {
+    if (!baseUrl) return;
+    try {
+      console.log("[updates] GET /update-schedule", `${baseUrl}/update-schedule`);
+      const res = await fetchWithTimeout(`${baseUrl}/update-schedule`, {}, 3000);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await tryJson(res);
+
+      if (typeof json === "object" && json) {
+        setScheduledUpdate({
+          scheduled: !!json.scheduled,
+          time: typeof json.time === "string" ? json.time : "",
+          latest: typeof json.latest === "string" ? json.latest : "",
+        });
+      } else {
+        setScheduledUpdate(null);
+      }
+    } catch (e) {
+      console.log("[updates] fetch update schedule failed", String(e));
+      setScheduledUpdate(null);
+    }
+  }
 
   const [updateStatus, setUpdateStatus] = useState(null); // { phase, downloadedMb, totalMb }
 
@@ -96,7 +120,7 @@ export default function UpdatesScreen() {
       console.log("[updates] GET /check-update", `${baseUrl}/check-update`);
 
       // Prefer JSON
-      const res = await fetchWithTimeout(`${baseUrl}/check-update`, {}, 4000);
+      const res = await fetchWithTimeout(`${baseUrl}/check-update`, {}, 10000);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = await tryJson(res);
 
@@ -125,7 +149,7 @@ export default function UpdatesScreen() {
       }
     } catch (e) {
       console.log("[updates] /check-update failed", String(e));
-      setUpdateInfo({ status: "error" });
+      setUpdateInfo({ status: "error", message: "Unable to check updates" });
     } finally {
       setChecking(false);
     }
@@ -133,6 +157,14 @@ export default function UpdatesScreen() {
 
   async function startUpdate() {
     if (!baseUrl) return;
+
+    try {
+      console.log("[updates] POST /cancel-update");
+      await fetchWithTimeout(`${baseUrl}/cancel-update`, { method: "POST" }, 3000);
+      setScheduledUpdate(null);
+    } catch (e) {
+      console.log("[updates] cancel scheduled update failed (continuing)", String(e));
+    }
 
     try {
       console.log("[updates] POST /update", `${baseUrl}/update`);
@@ -180,6 +212,55 @@ export default function UpdatesScreen() {
       }
       setUpdating(false);
       setUpdateStatus(null);
+    }
+  }
+
+  async function probeUpdateStatusOnce() {
+    if (!baseUrl) return;
+
+    try {
+      console.log("[updates] PROBE /update-status", `${baseUrl}/update-status`);
+      const res = await fetchWithTimeout(`${baseUrl}/update-status`, {}, 3000);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await tryJson(res);
+
+      const phase =
+        typeof json?.phase === "string"
+          ? json.phase
+          : typeof json === "string"
+          ? json
+          : "idle";
+
+      // If ESP is idle, do nothing
+      if (phase === "idle") {
+        return;
+      }
+
+      // ESP is actively updating → enter updating UI and start polling
+      console.log("[updates] detected active OTA phase:", phase);
+
+      setUpdating(true);
+      setChecking(false);
+
+      updateStartedAtRef.current = Date.now();
+      sawNonIdleRef.current = true;
+
+      setUpdateStatus({
+        ...(typeof json === "object" && json ? json : {}),
+        phase,
+        downloadedMb: Number(json?.downloadedMb || 0),
+        totalMb: Number(json?.totalMb || 0),
+        message: json?.message,
+      });
+
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+
+      pollRef.current = setInterval(pollUpdateStatus, POLL_INTERVAL);
+    } catch (e) {
+      console.log("[updates] probe update-status failed", String(e));
     }
   }
 
@@ -362,11 +443,17 @@ export default function UpdatesScreen() {
     await fetchVersion();
     await checkForUpdates();
     await fetchAutoUpdatePrefs();
+    await fetchUpdateSchedule();
     setRefreshing(false);
   }
 
   useEffect(() => {
-    if (baseUrl) fullRefresh();
+    if (!baseUrl) return;
+
+    (async () => {
+      await fullRefresh();
+      await probeUpdateStatusOnce();
+    })();
   }, [baseUrl]);
 
   useEffect(() => {
@@ -381,6 +468,7 @@ export default function UpdatesScreen() {
 
   const onRefresh = useCallback(async () => {
     await fullRefresh();
+    await probeUpdateStatusOnce();
   }, [baseUrl]);
 
   return (
@@ -400,6 +488,17 @@ export default function UpdatesScreen() {
 
         {!updating && (
           <View style={[styles.card, { backgroundColor: colors.card }]}>
+            {scheduledUpdate?.scheduled && (
+              <View style={{ marginBottom: 12 }}>
+                <Text style={[styles.updateTitle, { color: colors.text }]}>
+                  Update Scheduled
+                </Text>
+                <Text style={{ color: colors.textSecondary }}>
+                  An automatic update to version {scheduledUpdate.latest || "—"} is scheduled
+                  for {scheduledUpdate.time}.
+                </Text>
+              </View>
+            )}
             {checking ? (
               <ActivityIndicator />
             ) : updateInfo?.status === "up-to-date" ? (
@@ -412,7 +511,7 @@ export default function UpdatesScreen() {
                 </Text>
 
                 <TouchableOpacity style={styles.primaryButton} onPress={startUpdate}>
-                  <Text style={styles.primaryButtonText}>Update Now</Text>
+                  <Text style={styles.primaryButtonText}>Install Now</Text>
                 </TouchableOpacity>
               </View>
             ) : updateInfo?.status === "error" ? (

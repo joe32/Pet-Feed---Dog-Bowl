@@ -29,7 +29,7 @@
 #include <SPIFFS.h>
 #include <Update.h>
 
-#define FW_VERSION "1.3.4"
+#define FW_VERSION "1.3.5"
 #define FIRMWARE_DIR "/fw"
 
 String latestBinName = "";
@@ -1359,6 +1359,45 @@ void startWifiMode() {
     Serial.print(" | message: ");
     Serial.println(otaMessage);
     server.send(200, "application/json", res);
+  });
+
+  // ================= AUTO UPDATE SCHEDULE (APP) =================
+
+  // Return current scheduled auto update (if any)
+  server.on("/update-schedule", HTTP_GET, []() {
+    Serial.println("📥 HTTP /update-schedule called");
+
+    StaticJsonDocument<160> doc;
+
+    if (!autoUpdateScheduled || scheduledUpdateHour < 0 || scheduledUpdateMinute < 0) {
+      doc["scheduled"] = false;
+      doc["time"] = "";
+      doc["latest"] = "";
+    } else {
+      doc["scheduled"] = true;
+
+      char buf[6];
+      sprintf(buf, "%02d:%02d", scheduledUpdateHour, scheduledUpdateMinute);
+      doc["time"] = buf;
+
+      // optional: include the version we believe is available
+      doc["latest"] = checkUpdateLatest;
+    }
+
+    String res;
+    serializeJson(doc, res);
+
+    Serial.print("📤 /update-schedule response: ");
+    Serial.println(res);
+
+    server.send(200, "application/json", res);
+  });
+
+  // Cancel any scheduled auto update (used when user taps "Install now")
+  server.on("/cancel-update", HTTP_POST, []() {
+    Serial.println("📥 HTTP /cancel-update called");
+    clearAutoUpdateSchedule("cancelled by app");
+    server.send(200, "application/json", "{\"status\":\"cancelled\"}");
   });
 
   // ================= UPDATE WIFI (APP) =================
