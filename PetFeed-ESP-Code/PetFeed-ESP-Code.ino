@@ -29,7 +29,7 @@
 #include <SPIFFS.h>
 #include <Update.h>
 
-#define FW_VERSION "1.3.7"
+#define FW_VERSION "1.3.8"
 #define FIRMWARE_DIR "/fw"
 
 String latestBinName = "";
@@ -755,6 +755,37 @@ const int buzzerPin = 5;
 const int buzzerChannel = 7;
 const int buzzerResolution = 8;
 
+// ===== BUZZER PREFS =====
+// These are persisted (survive reboot/OTA). Defaults are ON.
+bool beepOnManualOpenClose = true;   // open/close button presses
+bool beepOnScheduleChange  = true;   // schedule/cancel schedule actions
+bool beepOnScheduledFeed   = true;   // scheduled feeding alert beeps
+
+void saveBuzzerPrefs() {
+  prefs.begin("petfeed", false);
+  prefs.putBool("beepOC", beepOnManualOpenClose);
+  prefs.putBool("beepSC", beepOnScheduleChange);
+  prefs.putBool("beepSF", beepOnScheduledFeed);
+  prefs.end();
+}
+
+void loadBuzzerPrefs() {
+  // Keep current in-code defaults unless prefs override them
+  prefs.begin("petfeed", true);
+
+  if (prefs.isKey("beepOC")) {
+    beepOnManualOpenClose = prefs.getBool("beepOC", beepOnManualOpenClose);
+  }
+  if (prefs.isKey("beepSC")) {
+    beepOnScheduleChange = prefs.getBool("beepSC", beepOnScheduleChange);
+  }
+  if (prefs.isKey("beepSF")) {
+    beepOnScheduledFeed = prefs.getBool("beepSF", beepOnScheduledFeed);
+  }
+
+  prefs.end();
+}
+
 // ================= RESET BUTTON =================
 const int resetButtonPin = 7;  // push button to GND
 bool resetButtonLast = HIGH;
@@ -788,6 +819,11 @@ void confirmBeep() {
 }
 
 void scheduledFeedBeep() {
+  if (!beepOnScheduledFeed) {
+    Serial.println("🔕 Scheduled feeding beep disabled");
+    return;
+  }
+
   // Long repeating tone to alert a scheduled feed
   for (int i = 0; i < 6; i++) {
     toneOn(1400);
@@ -911,7 +947,9 @@ void moveLidOpen() {
   delay(300);
   myServo.detach();
   lidIsOpen = true;
-  clickBeep();
+  if (beepOnManualOpenClose) {
+    clickBeep();
+  }
   notifyLidState();
 }
 
@@ -924,7 +962,9 @@ void moveLidClosed() {
   delay(300);
   myServo.detach();
   lidIsOpen = false;
-  clickBeep();
+  if (beepOnManualOpenClose) {
+    clickBeep();
+  }
   notifyLidState();
 }
 
@@ -1497,7 +1537,9 @@ void startWifiMode() {
     moveLidClosed();  // ensure closed when scheduling
     saveSchedule();
     notifySchedule();
-    confirmBeep();
+    if (beepOnScheduleChange) {
+      confirmBeep();
+    }
     Serial.println("✅ Schedule saved successfully");
     server.send(200, "application/json", "{\"status\":\"scheduled\"}");
   });
@@ -1510,7 +1552,9 @@ void startWifiMode() {
     scheduleExecutedToday = false;
     saveSchedule();
     notifySchedule();
-    beep(900, 120);
+    if (beepOnScheduleChange) {
+      beep(900, 120);
+    }
     Serial.println("🗑️ Schedule cancelled");
     server.send(200, "application/json", "{\"status\":\"cancelled\"}");
   });
@@ -1694,8 +1738,8 @@ void setup() {
 
   ledcSetup(buzzerChannel, 2000, buzzerResolution);
   ledcAttachPin(buzzerPin, buzzerChannel);
-  // Ensure buzzer starts at max duty when active
-  ledcWrite(buzzerChannel, 255);
+  // Ensure buzzer is completely silent on boot/reboot
+  ledcWrite(buzzerChannel, 0);
   toneOff();
 
   myServo.attach(servoPin);
@@ -1733,6 +1777,7 @@ void setup() {
 
   loadSchedule();
   loadAutoUpdatePrefs();
+  loadBuzzerPrefs();
 
   if (deviceMode == "wifi" && wifiSSID.length()) {
     startWifiMode();
