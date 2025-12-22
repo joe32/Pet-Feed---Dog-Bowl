@@ -29,7 +29,7 @@
 #include <SPIFFS.h>
 #include <Update.h>
 
-#define FW_VERSION "1.3.6"
+#define FW_VERSION "1.3.7"
 #define FIRMWARE_DIR "/fw"
 
 String latestBinName = "";
