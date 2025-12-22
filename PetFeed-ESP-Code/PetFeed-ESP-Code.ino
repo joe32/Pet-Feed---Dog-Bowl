@@ -29,7 +29,7 @@
 #include <SPIFFS.h>
 #include <Update.h>
 
-#define FW_VERSION "1.3.9"
+#define FW_VERSION "1.4.1"
 #define FIRMWARE_DIR "/fw"
 
 String latestBinName = "";
@@ -757,9 +757,9 @@ const int buzzerResolution = 8;
 
 // ===== BUZZER PREFS =====
 // These are persisted (survive reboot/OTA). Defaults are ON.
-bool beepOnManualOpenClose = false;   // open/close button presses
+bool beepOnManualOpenClose = true;   // open/close button presses
 bool beepOnScheduleChange  = true;   // schedule/cancel schedule actions
-bool beepOnScheduledFeed   = false;   // scheduled feeding alert beeps
+bool beepOnScheduledFeed   = true;   // scheduled feeding alert beeps
 
 void saveBuzzerPrefs() {
   prefs.begin("petfeed", false);
@@ -1304,6 +1304,62 @@ void startWifiMode() {
     }
 
     Serial.println("✅ Auto‑update preferences saved and acknowledged to app");
+    server.send(200, "application/json", "{\"status\":\"saved\"}");
+  });
+
+  // ===== BUZZER PREFS (APP) =====
+  // Get buzzer preferences
+  server.on("/buzzer-prefs", HTTP_GET, []() {
+    Serial.println("📥 HTTP /buzzer-prefs [GET] called");
+
+    StaticJsonDocument<128> doc;
+    doc["openClose"] = beepOnManualOpenClose;
+    doc["scheduleChange"] = beepOnScheduleChange;
+    doc["scheduledFeed"] = beepOnScheduledFeed;
+
+    String res;
+    serializeJson(doc, res);
+
+    Serial.print("📤 /buzzer-prefs response: ");
+    Serial.println(res);
+
+    server.send(200, "application/json", res);
+  });
+  server.on("/buzzer-prefs", HTTP_POST, []() {
+    Serial.println("📥 HTTP /buzzer-prefs [POST] called");
+
+    if (!server.hasArg("plain")) {
+      server.send(400, "text/plain", "no body");
+      return;
+    }
+
+    StaticJsonDocument<128> doc;
+    if (deserializeJson(doc, server.arg("plain"))) {
+      server.send(400, "text/plain", "bad json");
+      return;
+    }
+
+    // Read new values (default to current if missing)
+    if (doc.containsKey("openClose")) {
+      beepOnManualOpenClose = doc["openClose"];
+    }
+    if (doc.containsKey("scheduleChange")) {
+      beepOnScheduleChange = doc["scheduleChange"];
+    }
+    if (doc.containsKey("scheduledFeed")) {
+      beepOnScheduledFeed = doc["scheduledFeed"];
+    }
+
+    saveBuzzerPrefs();
+
+    Serial.println("🔔 BUZZER PREFS UPDATED:");
+    Serial.print(" - open/close: ");
+    Serial.println(beepOnManualOpenClose ? "true" : "false");
+    Serial.print(" - schedule change: ");
+    Serial.println(beepOnScheduleChange ? "true" : "false");
+    Serial.print(" - scheduled feed: ");
+    Serial.println(beepOnScheduledFeed ? "true" : "false");
+
     server.send(200, "application/json", "{\"status\":\"saved\"}");
   });
 

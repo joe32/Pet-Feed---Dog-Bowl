@@ -43,14 +43,12 @@ export default function UpdatesScreen() {
   const baseUrl = host ? `http://${host}.local` : null;
 
   const [refreshing, setRefreshing] = useState(false);
-  const [checking, setChecking] = useState(false);
   const [updating, setUpdating] = useState(false);
   const pollRef = useRef(null);
   const updateStartedAtRef = useRef(null);
   const sawNonIdleRef = useRef(false);
 
   const [currentVersion, setCurrentVersion] = useState(null);
-  const [updateInfo, setUpdateInfo] = useState(null); // { status: 'up-to-date' | 'update-available', latest }
   const [scheduledUpdate, setScheduledUpdate] = useState(null); 
   // { scheduled: boolean, time: string, latest: string }
   async function fetchUpdateSchedule() {
@@ -108,52 +106,6 @@ export default function UpdatesScreen() {
     }
   }
 
-  async function checkForUpdates() {
-    if (!baseUrl) return;
-    setChecking(true);
-    if (DEV_FORCE_UPDATE) {
-      setUpdateInfo({ status: "update-available", latest: "9.9.9" });
-      setChecking(false);
-      return;
-    }
-    try {
-      console.log("[updates] GET /check-update", `${baseUrl}/check-update`);
-
-      // Prefer JSON
-      const res = await fetchWithTimeout(`${baseUrl}/check-update`, {}, 10000);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const data = await tryJson(res);
-
-      // Expected ESP JSON (recommended):
-      // { status: "up-to-date" } OR { status: "update-available", latest: "1.2.4" }
-      if (typeof data === "object" && data) {
-        if (data.status === "up-to-date" || data.status === "update-available") {
-          setUpdateInfo(data);
-        } else if (typeof data.version === "string") {
-          // fallback
-          setUpdateInfo({ status: "update-available", latest: data.version });
-        } else {
-          setUpdateInfo(null);
-        }
-        return;
-      }
-
-      // If ESP returned plain text
-      const text = String(data || "");
-      if (text.toLowerCase().includes("up to date")) {
-        setUpdateInfo({ status: "up-to-date" });
-      } else if (text.trim()) {
-        setUpdateInfo({ status: "update-available", latest: text.trim() });
-      } else {
-        setUpdateInfo(null);
-      }
-    } catch (e) {
-      console.log("[updates] /check-update failed", String(e));
-      setUpdateInfo({ status: "error", message: "Unable to check updates" });
-    } finally {
-      setChecking(false);
-    }
-  }
 
   async function startUpdate() {
     if (!baseUrl) return;
@@ -441,7 +393,6 @@ export default function UpdatesScreen() {
     if (!baseUrl) return;
     setRefreshing(true);
     await fetchVersion();
-    await checkForUpdates();
     await fetchAutoUpdatePrefs();
     await fetchUpdateSchedule();
     setRefreshing(false);
@@ -486,47 +437,6 @@ export default function UpdatesScreen() {
           </Text>
         </View>
 
-        {!updating && (
-          <View style={[styles.card, { backgroundColor: colors.card }]}>
-            {scheduledUpdate?.scheduled && (
-              <View style={{ marginBottom: 12 }}>
-                <Text style={[styles.updateTitle, { color: colors.text }]}>
-                  Update Scheduled
-                </Text>
-                <Text style={{ color: colors.textSecondary }}>
-                  An automatic update to version {scheduledUpdate.latest || "—"} is scheduled
-                  for {scheduledUpdate.time}.
-                </Text>
-              </View>
-            )}
-            {checking ? (
-              <ActivityIndicator />
-            ) : updateInfo?.status === "up-to-date" ? (
-              <Text style={{ color: colors.text }}>Already up to date</Text>
-            ) : updateInfo?.status === "update-available" ? (
-              <View>
-                <Text style={[styles.updateTitle, { color: colors.text }]}>New Update Available</Text>
-                <Text style={{ color: colors.textSecondary }}>
-                  Version {updateInfo.latest}
-                </Text>
-
-                <TouchableOpacity style={styles.primaryButton} onPress={startUpdate}>
-                  <Text style={styles.primaryButtonText}>Install Now</Text>
-                </TouchableOpacity>
-              </View>
-            ) : updateInfo?.status === "error" ? (
-              <TouchableOpacity onPress={checkForUpdates} style={styles.linkButton}>
-                <Text style={{ color: colors.tint }}>
-                  Unable to check updates — tap to retry
-                </Text>
-              </TouchableOpacity>
-            ) : (
-              <TouchableOpacity onPress={checkForUpdates} style={styles.linkButton}>
-                <Text style={{ color: colors.tint }}>Check for updates</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
 
         {updating && (
           <View style={[styles.card, { backgroundColor: colors.card }]}>

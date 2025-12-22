@@ -63,18 +63,21 @@ export default function AddDeviceScreen() {
   const [rebooting, setRebooting] = useState(false);
   const [wifiScanStarted, setWifiScanStarted] = useState(false);
 
-  // test to show popup on expo.
-
+  // TEMP – force Wi-Fi popup + fake networks (REMOVE LATER)
+  
   // useEffect(() => {
   //   setSetupStep("wifi");
-  //   setGeneratedHost("test-host");
+  //   setWifiScanStarted(true);
+  //   setLoadingWifi(false);
+  //   setWifiTimedOut(false);
+  //   setWifiNetworks([
+  //     "Home_WiFi",
+  //     "PetFeeder_2G",
+  //     "BT-Hub-123",
+  //     "iPhone Hotspot",
+  //     "Guest Network",
+  //   ]);
   // }, []);
-  // useEffect(() => {
-  //   if (wifiTimedOut) {
-  //     setLoadingWifi(false);
-  //   }
-  // }, [wifiTimedOut]);
-
   // (REMOVED: auto-start Wi-Fi scan when modal appears)
 
   async function scanWifiNetworks() {
@@ -517,17 +520,20 @@ export default function AddDeviceScreen() {
                   <TouchableOpacity
                     onPress={scanWifiNetworks}
                     style={{
-                      backgroundColor: scheme === "dark" ? "#1f2933" : colors.tint,
+                      backgroundColor:
+                        scheme === "dark" ? "#1f2933" : colors.tint,
                       paddingVertical: 10,
                       paddingHorizontal: 18,
                       borderRadius: 10,
                       borderWidth: scheme === "dark" ? 1 : 0,
-                      borderColor: scheme === "dark" ? colors.tint : "transparent",
+                      borderColor:
+                        scheme === "dark" ? colors.tint : "transparent",
                     }}
                   >
                     <Text
                       style={{
-                        color: scheme === "dark" ? colors.tint : colors.background,
+                        color:
+                          scheme === "dark" ? colors.tint : colors.background,
                         fontWeight: "600",
                         fontSize: 16,
                       }}
@@ -614,19 +620,21 @@ export default function AddDeviceScreen() {
                   </ScrollView>
                 )}
 
-                {wifiScanStarted && wifiTimedOut && wifiNetworks.length === 0 && (
-                  <View style={styles.wifiNoNetworksBox}>
-                    <Text
-                      style={{
-                        color: colors.textSecondary,
-                        fontSize: 16,
-                        textAlign: "center",
-                      }}
-                    >
-                      No networks found
-                    </Text>
-                  </View>
-                )}
+                {wifiScanStarted &&
+                  wifiTimedOut &&
+                  wifiNetworks.length === 0 && (
+                    <View style={styles.wifiNoNetworksBox}>
+                      <Text
+                        style={{
+                          color: colors.textSecondary,
+                          fontSize: 16,
+                          textAlign: "center",
+                        }}
+                      >
+                        No networks found
+                      </Text>
+                    </View>
+                  )}
               </View>
 
               {/* Wi-Fi actions row: Re-scan and Enter manually */}
@@ -853,11 +861,11 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    paddingVertical: 14,
-    paddingHorizontal: 12,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
     borderWidth: 1,
-    borderRadius: 12,
-    marginTop: 10,
+    borderRadius: 10,
+    marginTop: 6,
   },
   // --- Wi-Fi step additions ---
   wifiScanningSection: {
@@ -867,9 +875,9 @@ const styles = StyleSheet.create({
     marginTop: 0,
   },
   wifiListBox: {
-    height: 60,
-    minHeight: 60,
-    maxHeight: 70,
+    height: 90,
+    minHeight: 90,
+    maxHeight: 90,
     width: "100%",
     borderWidth: 1,
     borderColor: "#00000022",

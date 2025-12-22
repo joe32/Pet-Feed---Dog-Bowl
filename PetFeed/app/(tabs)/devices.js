@@ -7,8 +7,43 @@ import {
   Alert,
   RefreshControl,
   ScrollView,
-  // ActivityIndicator,
+  Switch,
+  ActivityIndicator,
 } from "react-native";
+  // --- Beep Settings helpers ---
+  async function loadBeepPrefs(host) {
+    setBeepLoading(true);
+    try {
+      console.log("[Beep] Requesting /buzzer-prefs");
+      const res = await fetch(`http://${host}.local/buzzer-prefs`);
+      const json = await res.json();
+      console.log("[Beep] Received prefs", json);
+      setBeepPrefs({
+        openClose: !!json.openClose,
+        schedule: !!json.schedule,
+        feeding: !!json.feeding,
+      });
+    } catch (e) {
+      Alert.alert("Failed", "Could not load beep settings from device.");
+    }
+    setBeepLoading(false);
+  }
+
+  async function saveBeepPrefs() {
+    if (!beepHost) return;
+    try {
+      console.log("[Beep] Sending prefs", beepPrefs);
+      await fetch(`http://${beepHost}.local/buzzer-prefs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(beepPrefs),
+      });
+      setBeepDirty(false);
+      Alert.alert("Saved", "Beep settings updated.");
+    } catch {
+      Alert.alert("Failed", "Could not save beep settings.");
+    }
+  }
 import { Ionicons } from "@expo/vector-icons";
 import { useColorScheme } from "react-native";
 import { Colors } from "../../constants/theme";
@@ -51,52 +86,18 @@ async function pingHost(host) {
   }
 }
 
-// Helper to check update availability for a device
-async function checkUpdateForHost(host) {
-  console.log("[Devices] Requesting /check-update for", host);
-
-  const start = Date.now();
-  const TIMEOUT_MS = 10000;
-
-  while (Date.now() - start < TIMEOUT_MS) {
-    try {
-      const controller = new AbortController();
-      const t = setTimeout(() => controller.abort(), 3000);
-
-      const res = await fetch(`http://${host}.local/check-update`, {
-        signal: controller.signal,
-      });
-
-      clearTimeout(t);
-
-      if (!res.ok) {
-        await new Promise((r) => setTimeout(r, 500));
-        continue;
-      }
-
-      const json = await res.json();
-      console.log("[Devices] /check-update response for", host, json);
-
-      if (json.status === "available") {
-        return { status: "available", version: json.latest || json.version };
-      }
-
-      if (json.status === "up_to_date" || json.status === "up-to-date") {
-        return { status: "up-to-date" };
-      }
-
-      // ESP responded but not ready yet
-      await new Promise((r) => setTimeout(r, 500));
-    } catch (e) {
-      await new Promise((r) => setTimeout(r, 500));
-    }
-  }
-
-  console.log("[Devices] /check-update timed out for", host);
-  return { status: "unknown" };
-}
 
 export default function DevicesScreen() {
+  // Beep Settings modal state
+  const [showBeepModal, setShowBeepModal] = useState(false);
+  const [beepLoading, setBeepLoading] = useState(false);
+  const [beepPrefs, setBeepPrefs] = useState({
+    openClose: false,
+    schedule: false,
+    feeding: false,
+  });
+  const [beepDirty, setBeepDirty] = useState(false);
+  const [beepHost, setBeepHost] = useState(null);
   const router = useRouter();
   const scheme = useColorScheme() ?? "light";
   const colors = Colors[scheme];
@@ -111,22 +112,20 @@ export default function DevicesScreen() {
   const [addingLocalDevice, setAddingLocalDevice] = useState(null);
   const [localDeviceName, setLocalDeviceName] = useState("");
 
-  const [checkingUpdateId, setCheckingUpdateId] = useState(null);
-  const [showUpToDateId, setShowUpToDateId] = useState(null);
 
 
   const loadDevices = useCallback(async () => {
     const saved = await AsyncStorage.getItem(STORAGE_KEY);
     const active = await AsyncStorage.getItem(ACTIVE_DEVICE_KEY);
     const parsed = saved ? JSON.parse(saved) : [];
-    const normalised = parsed.map((d) => ({
-      ...d,
-      mode: d.mode || "wifi",
-      online: typeof d.online === "boolean" ? d.online : false,
-      updateAvailable: false,
-      updateVersion: null,
-      updateUnknown: false,
-    }));
+    const normalised = parsed.map((d) => {
+      const { updateAvailable, updateVersion, updateUnknown, ...rest } = d;
+      return {
+        ...rest,
+        mode: d.mode || "wifi",
+        online: typeof d.online === "boolean" ? d.online : false,
+      };
+    });
     setDevices(normalised);
 
     // Auto-select newly added device if none is currently selected
@@ -183,66 +182,6 @@ export default function DevicesScreen() {
       })();
     }, [])
   );
-  // Manual update check for a single device
-  async function runManualUpdateCheck(device) {
-    console.log("[Devices] Manual update check triggered for", device.host);
-    if (!device?.host || checkingUpdateId) return;
-
-    setCheckingUpdateId(device.id);
-    setShowUpToDateId(null);
-
-    const result = await checkUpdateForHost(device.host);
-
-    setCheckingUpdateId(null);
-
-    if (result.status === "available") {
-      setDevices((prev) =>
-        prev.map((d) =>
-          d.id === device.id
-            ? {
-                ...d,
-                updateAvailable: true,
-                updateVersion: result.version,
-                updateUnknown: false,
-              }
-            : d
-        )
-      );
-      return;
-    }
-
-    if (result.status === "up-to-date") {
-      setDevices((prev) =>
-        prev.map((d) =>
-          d.id === device.id
-            ? {
-                ...d,
-                updateAvailable: false,
-                updateVersion: null,
-                updateUnknown: false,
-              }
-            : d
-        )
-      );
-      setShowUpToDateId(device.id);
-      setTimeout(() => setShowUpToDateId(null), 10000);
-      return;
-    }
-
-    // unknown / no response
-    setDevices((prev) =>
-      prev.map((d) =>
-        d.id === device.id
-          ? {
-              ...d,
-              updateAvailable: false,
-              updateVersion: null,
-              updateUnknown: true,
-            }
-          : d
-      )
-    );
-  }
 
   // useFocusEffect(
   //   useCallback(() => {
@@ -315,6 +254,34 @@ export default function DevicesScreen() {
   // run ONLY once on screen mount
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // 🔁 Poll device version every 5 seconds while on Devices screen
+  useEffect(() => {
+    if (!devices.length) return;
+
+    const interval = setInterval(async () => {
+      console.log("[Devices] 5s poll: fetching /version for all devices");
+
+      const updated = await Promise.all(
+        devices.map(async (d) => {
+          if (!d.host) return d;
+
+          const result = await pingHost(d.host);
+
+          return {
+            ...d,
+            online: result.online,
+            firmware: result.firmware ?? "unavailable",
+          };
+        })
+      );
+
+      setDevices(updated);
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [devices]);
 
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -428,12 +395,22 @@ export default function DevicesScreen() {
         },
       },
       {
-        text: "Updates",
+        text: "Update Settings",
         onPress: () => {
           router.push({
             pathname: "/(device-setup)/updates",
             params: { host: device.host, name: device.name },
           });
+        },
+      },
+      // Insert Beep Settings option before Device Details
+      {
+        text: "Beep Settings",
+        onPress: async () => {
+          setBeepHost(device.host);
+          setShowBeepModal(true);
+          setBeepDirty(false);
+          await loadBeepPrefs(device.host);
         },
       },
       // Only render Edit Wi‑Fi for non-local devices
@@ -534,32 +511,6 @@ Firmware: ${device.firmware || "Unknown"}`,
               isActive && { borderColor: colors.tint },
             ]}
           >
-            {/* Update available indicator at top-right */}
-            {device.updateAvailable && (
-              <View
-                style={{
-                  position: "absolute",
-                  top: 16,
-                  right: 12,
-                  flexDirection: "row",
-                  alignItems: "center",
-                }}
-              >
-                <View
-                  style={{
-                    width: 8,
-                    height: 8,
-                    borderRadius: 4,
-                    backgroundColor: "#0A84FF",
-                    marginRight: 4,
-                  }}
-                />
-                <Text style={{ color: "#0A84FF", fontWeight: "700", fontSize: 13 }}>
-                  Update available
-                </Text>
-              </View>
-            )}
-
             <View
               style={[
                 styles.statusDot,
@@ -568,6 +519,7 @@ Firmware: ${device.firmware || "Unknown"}`,
             />
 
             <View style={{ flex: 1 }}>
+              {/* Device name only */}
               <Text style={[styles.deviceName, { color: colors.text }]}>
                 {device.name}
               </Text>
@@ -576,7 +528,6 @@ Firmware: ${device.firmware || "Unknown"}`,
                   {isActive ? "Selected" : "Not selected"} ·{" "}
                   {device.online ? "Online" : "Offline"}
                 </Text>
-                {/* Removed inline update available indicator here */}
               </View>
               <Text
                 style={{
@@ -588,83 +539,28 @@ Firmware: ${device.firmware || "Unknown"}`,
                 Connection:{" "}
                 {device.mode === "local" ? "Local device" : "Wi‑Fi (local)"}
               </Text>
-
-              <View style={{ marginTop: 6 }}>
-                {checkingUpdateId === device.id ? (
-                  <Text style={{ color: "#0A84FF", fontWeight: "600", fontSize: 13 }}>
-                    Checking for updates…
-                  </Text>
-                ) : showUpToDateId === device.id ? (
-                  <Text style={{ color: colors.textSecondary, fontSize: 13 }}>
-                    Already up to date
-                  </Text>
-                ) : device.updateUnknown ? (
-                  <TouchableOpacity onPress={() => runManualUpdateCheck(device)}>
-                    <Text style={{ color: "#FF9F0A", fontSize: 13, fontWeight: "600" }}>
-                      Unable to check updates · Tap to retry
-                    </Text>
-                  </TouchableOpacity>
-                ) : null}
-
-                {device.updateAvailable && (
-                  <View>
-                    <TouchableOpacity
-                      onPress={() =>
-                        router.push({
-                          pathname: "/(device-setup)/updates",
-                          params: { host: device.host, name: device.name },
-                        })
-                      }
-                      style={{ marginTop: 4 }}
-                    >
-                      <Text style={{ color: "#0A84FF", fontWeight: "600", fontSize: 13 }}>
-                        Update now
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-
-                {!device.updateAvailable &&
-                  checkingUpdateId !== device.id &&
-                  showUpToDateId !== device.id &&
-                  !device.updateUnknown && (
-                    <TouchableOpacity onPress={() => runManualUpdateCheck(device)}>
-                      <Text style={{ color: "#0A84FF", fontWeight: "600", fontSize: 13 }}>
-                        Check for updates
-                      </Text>
-                    </TouchableOpacity>
-                  )}
-              </View>
             </View>
 
-            {/* Version label moved to bottom-right */}
-            <View
-              style={{
-                position: "absolute",
-                bottom: 16,
-                right: 12,
-                alignItems: "flex-end",
-              }}
-            >
-              <Text style={{ color: colors.textSecondary, fontSize: 12 }}>
+            <View style={{ alignItems: "flex-end", marginLeft: 12 }}>
+              <Text style={{ color: colors.textSecondary, fontSize: 13, marginBottom: 6 }}>
                 Version {device.firmware === "unavailable" ? "Unavailable" : device.firmware}
               </Text>
-            </View>
 
-            <View style={styles.inlineActions}>
-              <TouchableOpacity onPress={() => openDeviceSettings(device)}>
-                <Ionicons
-                  name="settings-outline"
-                  size={22}
-                  color={colors.textSecondary}
-                />
-              </TouchableOpacity>
-              <TouchableOpacity
-                onPress={() => removeDevice(device)}
-                style={{ marginLeft: 12 }}
-              >
-                <Ionicons name="trash-outline" size={22} color="#ff3b30" />
-              </TouchableOpacity>
+              <View style={styles.inlineActions}>
+                <TouchableOpacity onPress={() => openDeviceSettings(device)}>
+                  <Ionicons
+                    name="settings-outline"
+                    size={22}
+                    color={colors.textSecondary}
+                  />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={() => removeDevice(device)}
+                  style={{ marginLeft: 12 }}
+                >
+                  <Ionicons name="trash-outline" size={22} color="#ff3b30" />
+                </TouchableOpacity>
+              </View>
             </View>
           </TouchableOpacity>
 
@@ -944,6 +840,71 @@ Firmware: ${device.firmware || "Unknown"}`,
                 style={{ color: colors.textSecondary, textAlign: "center" }}
               >
                 Cancel
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+      {showBeepModal && (
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modal, { backgroundColor: colors.background }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>
+              Beep Settings
+            </Text>
+
+            {beepLoading ? (
+              <ActivityIndicator size="small" color={colors.tint} />
+            ) : (
+              <>
+                {[
+                  { key: "openClose", label: "Beep on open / close" },
+                  { key: "schedule", label: "Beep on schedule changes" },
+                  { key: "feeding", label: "Beep on scheduled feeding" },
+                ].map((item) => (
+                  <View
+                    key={item.key}
+                    style={{
+                      flexDirection: "row",
+                      justifyContent: "space-between",
+                      alignItems: "center",
+                      marginVertical: 8,
+                    }}
+                  >
+                    <Text style={{ color: colors.text }}>{item.label}</Text>
+                    <Switch
+                      value={beepPrefs[item.key]}
+                      onValueChange={(v) => {
+                        setBeepPrefs((p) => ({ ...p, [item.key]: v }));
+                        setBeepDirty(true);
+                      }}
+                    />
+                  </View>
+                ))}
+
+                <TouchableOpacity
+                  disabled={!beepDirty}
+                  onPress={saveBeepPrefs}
+                  style={[
+                    styles.modalButton,
+                    {
+                      backgroundColor: beepDirty ? colors.tint : "#ccc",
+                      marginTop: 16,
+                    },
+                  ]}
+                >
+                  <Text style={{ color: colors.background, fontWeight: "600" }}>
+                    Save
+                  </Text>
+                </TouchableOpacity>
+              </>
+            )}
+
+            <TouchableOpacity
+              onPress={() => setShowBeepModal(false)}
+              style={{ marginTop: 12 }}
+            >
+              <Text style={{ color: colors.textSecondary, textAlign: "center" }}>
+                Close
               </Text>
             </TouchableOpacity>
           </View>
