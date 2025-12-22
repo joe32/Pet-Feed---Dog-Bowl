@@ -1,47 +1,51 @@
-#include <Arduino.h>
-#include <BLEDevice.h>
-#include <BLEServer.h>
-#include <BLE2902.h>
+#include <NimBLEDevice.h>
 
 #define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
 #define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 
-BLECharacteristic *pCharacteristic = nullptr;
+NimBLECharacteristic* pChar;
+
+/* 🔔 CONNECTION CALLBACKS */
+class ServerCallbacks : public NimBLEServerCallbacks {
+  void onConnect(NimBLEServer* pServer, ble_gap_conn_desc* desc) {
+    Serial.println("✅ BLE device connected");
+  }
+
+  void onDisconnect(NimBLEServer* pServer) {
+    Serial.println("❌ BLE device disconnected");
+    NimBLEDevice::startAdvertising();
+  }
+};
 
 void setup() {
   Serial.begin(115200);
-  delay(800);
+  delay(1000);
 
-  // Hard reset BLE stack (important on ESP32-S3 when state gets weird)
-  BLEDevice::deinit(true);
-  delay(200);
+  Serial.println("Booting BLE test...");
 
-  BLEDevice::init("PetFeeder123");
+  NimBLEDevice::init("PetFeeder1");
+  NimBLEDevice::setPower(ESP_PWR_LVL_P9); // max power, important on S3
 
-  BLEServer *server = BLEDevice::createServer();
-  BLEService *service = server->createService(SERVICE_UUID);
+  NimBLEServer* server = NimBLEDevice::createServer();
+  server->setCallbacks(new ServerCallbacks());
 
-  pCharacteristic = service->createCharacteristic(
+  NimBLEService* service = server->createService(SERVICE_UUID);
+
+  pChar = service->createCharacteristic(
     CHARACTERISTIC_UUID,
-    BLECharacteristic::PROPERTY_READ |
-    BLECharacteristic::PROPERTY_WRITE |
-    BLECharacteristic::PROPERTY_NOTIFY
+    NIMBLE_PROPERTY::READ |
+    NIMBLE_PROPERTY::WRITE |
+    NIMBLE_PROPERTY::NOTIFY
   );
 
-  pCharacteristic->addDescriptor(new BLE2902());
-  pCharacteristic->setValue("READY");
-
+  pChar->setValue("READY");
   service->start();
 
-  BLEAdvertising *adv = BLEDevice::getAdvertising();
-  adv->stop();
+  NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
   adv->addServiceUUID(SERVICE_UUID);
-  adv->setScanResponse(true);
   adv->start();
 
-  Serial.println("Advertising: PetFeeder123");
-  Serial.println("Service UUID: " SERVICE_UUID);
-  Serial.println("Characteristic UUID: " CHARACTERISTIC_UUID);
+  Serial.println("🔵 BLE advertising started");
 }
 
 void loop() {

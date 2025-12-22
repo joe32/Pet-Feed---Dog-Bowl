@@ -29,24 +29,6 @@
 #include <SPIFFS.h>
 #include <Update.h>
 
-#if ESP_ARDUINO_VERSION_MAJOR >= 3
-// Arduino-ESP32 v3.x LEDC compatibility (ESP32-S3)
-// v3 uses ledcAttach(pin, freq, resolution) and returns a channel.
-// Keep legacy calls working by mapping them correctly.
-static int __ledc_channels[16] = { -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1 };
-
-inline void ledcSetup(uint8_t ch, uint32_t freq, uint8_t res) {
-  // store requested channel index for later attach
-  __ledc_channels[ch] = res;  // mark as configured
-}
-
-inline void ledcAttachPin(uint8_t pin, uint8_t ch) {
-  // attach using the v3 API: pin, freq, resolution
-  // frequency is fixed later via ledcWriteTone / ledcWrite
-  ledcAttach(pin, 2000, __ledc_channels[ch] >= 0 ? __ledc_channels[ch] : 8);
-}
-#endif
-
 #define FW_VERSION "1.4.5"
 #define FIRMWARE_DIR "/fw"
 
@@ -54,11 +36,11 @@ String latestBinName = "";
 String latestVersionName = "";
 
 // ===== CHECK-UPDATE RESULT STATE =====
-String checkUpdateResult = "unknown";  // unknown | up_to_date | update_available | error
+String checkUpdateResult = "unknown"; // unknown | up_to_date | update_available | error
 String checkUpdateLatest = "";
 
 // ===== AUTO UPDATE RESULT STATE (SEPARATE FROM MANUAL) =====
-String autoCheckResult = "unknown";  // unknown | up_to_date | update_available | error
+String autoCheckResult = "unknown";   // unknown | up_to_date | update_available | error
 String autoCheckLatest = "";
 
 // ===== APP OTA STATUS =====
@@ -89,12 +71,12 @@ const unsigned long AUTO_UPDATE_INTERVAL_MS = 300000;
 bool autoUpdateScheduled = false;
 int scheduledUpdateHour = -1;
 int scheduledUpdateMinute = -1;
-int scheduledUpdateDayOfYear = -1;  // day-of-year the schedule is intended for
-bool autoUpdateStarted = false;     // prevents double-start within the same minute
+int scheduledUpdateDayOfYear = -1;   // day-of-year the schedule is intended for
+bool autoUpdateStarted = false;      // prevents double-start within the same minute
 
 // If an auto update attempt fails, we want to be able to reschedule and try again
 unsigned long lastAutoUpdateAttemptMs = 0;
-const unsigned long AUTO_UPDATE_RETRY_BACKOFF_MS = 5 * 60 * 1000;  // 5 minutes
+const unsigned long AUTO_UPDATE_RETRY_BACKOFF_MS = 5 * 60 * 1000; // 5 minutes
 
 void clearAutoUpdateSchedule(const char *reason) {
   if (autoUpdateScheduled || scheduledUpdateHour != -1 || scheduledUpdateMinute != -1) {
@@ -784,9 +766,9 @@ const int buzzerResolution = 8;
 
 // ===== BUZZER PREFS =====
 // These are persisted (survive reboot/OTA). Defaults are ON.
-bool beepOnManualOpenClose = true;  // open/close button presses
-bool beepOnScheduleChange = true;   // schedule/cancel schedule actions
-bool beepOnScheduledFeed = true;    // scheduled feeding alert beeps
+bool beepOnManualOpenClose = true;   // open/close button presses
+bool beepOnScheduleChange  = true;   // schedule/cancel schedule actions
+bool beepOnScheduledFeed   = true;   // scheduled feeding alert beeps
 
 void saveBuzzerPrefs() {
   prefs.begin("petfeed", false);
@@ -1430,7 +1412,8 @@ void startWifiMode() {
         NULL,
         1,
         &checkUpdateTaskHandle,
-        0);
+        0
+      );
 
       // Wait for task to finish (max 5s)
       unsigned long start = millis();
@@ -1686,7 +1669,7 @@ void wifiScanTask(void *param) {
   WiFi.disconnect(true, true);
   delay(200);
 
-  int n = WiFi.scanNetworks(false, true);  // sync scan (safer in its own task)
+  int n = WiFi.scanNetworks(false, true); // sync scan (safer in its own task)
 
   if (n <= 0) {
     Serial.println("⚠️ BLE WIFISCAN: no networks found");
@@ -1763,7 +1746,8 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks {
           NULL,
           1,
           &wifiScanTaskHandle,
-          0);
+          0
+        );
       }
 
       return;
@@ -1803,7 +1787,7 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks {
       mdnsHost = cmd.substring(h1 + 5, end);
     }
 
-    String newMode = "wifi";  // default
+    String newMode = "wifi"; // default
 
     if (m1 >= 0) {
       int end = cmd.indexOf(";", m1);
@@ -1887,40 +1871,15 @@ void setup() {
   currentAngle = LID_CLOSED;
   Serial.println("🔒 Lid forced closed on startup");
 
-  //testing
-
   if (!SPIFFS.begin(false)) {
-    Serial.println("SPIFFS mount failed, formatting...");
-    if (SPIFFS.format()) {
-      Serial.println("SPIFFS formatted");
-      if (!SPIFFS.begin(true)) {
-        Serial.println("❌ SPIFFS mount failed even after format");
-      } else {
-        Serial.println("📁 SPIFFS ready after format");
-        spiffsMounted = true;
-      }
-    } else {
-      Serial.println("❌ SPIFFS format failed");
-    }
+    Serial.println("❌ SPIFFS mount failed at boot");
   } else {
-    Serial.println("📁 SPIFFS ready");
     spiffsMounted = true;
+    if (!SPIFFS.exists(FIRMWARE_DIR)) {
+      SPIFFS.mkdir(FIRMWARE_DIR);
+    }
+    Serial.println("📁 SPIFFS ready");
   }
-
-  if (spiffsMounted && !SPIFFS.exists(FIRMWARE_DIR)) {
-    SPIFFS.mkdir(FIRMWARE_DIR);
-  }
-
- //orginal 
-  // if (!SPIFFS.begin(false)) {
-  //   Serial.println("❌ SPIFFS mount failed at boot");
-  // } else {
-  //   spiffsMounted = true;
-  //   if (!SPIFFS.exists(FIRMWARE_DIR)) {
-  //     SPIFFS.mkdir(FIRMWARE_DIR);
-  //   }
-  //   Serial.println("📁 SPIFFS ready");
-  // }
 
   // Clean up old firmware except current before checking deviceMode
   cleanupFirmwareExceptCurrent();
@@ -1988,7 +1947,8 @@ void loop() {
       NULL,
       1,
       &wifiScanTaskHandle,
-      0);
+      0
+    );
   }
   // ================= RESET BUTTON HANDLING =================
   bool resetButtonState = digitalRead(resetButtonPin);
@@ -2167,10 +2127,11 @@ void loop() {
               checkUpdateTask,
               "checkUpdateTaskAuto",
               6144,
-              (void *)1,  // <-- mark as AUTO
+              (void*)1,   // <-- mark as AUTO
               1,
               &checkUpdateTaskHandle,
-              0);
+              0
+            );
           }
         } else {
           Serial.println("⏸️ AUTO UPDATE: skipped (check already running)");
@@ -2213,13 +2174,20 @@ void loop() {
       }
 
       // ================= AUTO UPDATE EXECUTION =================
-      if (autoUpdateScheduled && autoUpdateEnabled && !autoUpdateStarted && preferredUpdateHour >= 0 && preferredUpdateMinute >= 0 && WiFi.status() == WL_CONNECTED && t.tm_hour == scheduledUpdateHour && t.tm_min == scheduledUpdateMinute) {
+      if (autoUpdateScheduled &&
+          autoUpdateEnabled &&
+          !autoUpdateStarted &&
+          preferredUpdateHour >= 0 &&
+          preferredUpdateMinute >= 0 &&
+          WiFi.status() == WL_CONNECTED &&
+          t.tm_hour == scheduledUpdateHour &&
+          t.tm_min == scheduledUpdateMinute) {
 
         Serial.println("⏰ AUTO UPDATE: scheduled minute reached");
         Serial.print("🕒 AUTO UPDATE: starting at ");
         Serial.printf("%02d:%02d:%02d\n", t.tm_hour, t.tm_min, t.tm_sec);
 
-        autoUpdateStarted = true;  // prevents double-trigger within the same minute
+        autoUpdateStarted = true;      // prevents double-trigger within the same minute
         clearAutoUpdateSchedule("triggered");
 
         if (!otaRunning && otaTaskHandle == nullptr) {
@@ -2233,7 +2201,8 @@ void loop() {
             NULL,
             1,
             &otaTaskHandle,
-            0);
+            0
+          );
         } else {
           Serial.println("⚠️ AUTO UPDATE: skipped (OTA already running)");
         }
