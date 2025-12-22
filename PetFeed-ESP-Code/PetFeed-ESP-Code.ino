@@ -29,7 +29,7 @@
 #include <SPIFFS.h>
 #include <Update.h>
 
-#define FW_VERSION "1.4.2"
+#define FW_VERSION "1.4.3"
 #define FIRMWARE_DIR "/fw"
 
 String latestBinName = "";
@@ -481,6 +481,11 @@ unsigned long lastDiscoveryBroadcast = 0;
 unsigned long wifiScanStart = 0;
 bool wifiScanActive = false;
 String lastWifiScanResult = "";
+
+// BLE WiFi scan task coordination (avoid doing WiFi ops inside BLE callback)
+volatile bool wifiScanRequested = false;
+volatile bool wifiScanInProgress = false;
+TaskHandle_t wifiScanTaskHandle = nullptr;
 
 // ================= TIME =================
 int lastPrintedMinute = -1;
@@ -1647,6 +1652,54 @@ void startWifiMode() {
   }
 }
 
+// ================= BLE WiFi scan task =================
+void wifiScanTask(void *param) {
+  wifiScanInProgress = true;
+  wifiScanRequested = false;
+
+  Serial.println("📡 BLE WIFISCAN: running scan task");
+
+  // Keep BLE alive; just use WiFi STA scanning.
+  WiFi.mode(WIFI_STA);
+  WiFi.disconnect(true, true);
+  delay(200);
+
+  int n = WiFi.scanNetworks(false, true); // sync scan (safer in its own task)
+
+  if (n <= 0) {
+    Serial.println("⚠️ BLE WIFISCAN: no networks found");
+    if (pCharacteristic) {
+      pCharacteristic->setValue("WIFI_SCAN:EMPTY");
+      pCharacteristic->notify();
+    }
+    WiFi.scanDelete();
+    wifiScanInProgress = false;
+    wifiScanTaskHandle = nullptr;
+    vTaskDelete(NULL);
+    return;
+  }
+
+  String result = "WIFI_SCAN:";
+  for (int i = 0; i < n; i++) {
+    result += WiFi.SSID(i);
+    if (i < n - 1) result += ",";
+  }
+
+  WiFi.scanDelete();
+
+  if (pCharacteristic) {
+    pCharacteristic->setValue(result.c_str());
+    pCharacteristic->notify();
+  }
+
+  Serial.print("📤 BLE WIFISCAN response sent: ");
+  Serial.println(result);
+
+  wifiScanInProgress = false;
+  wifiScanTaskHandle = nullptr;
+  vTaskDelete(NULL);
+}
+
 // ================= BLE CALLBACKS =================
 class ServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer *) override {
@@ -1672,60 +1725,26 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks {
     if (cmd == "WIFISCAN") {
       Serial.println("📡 BLE WIFISCAN command received");
 
-      // HARD GUARD: prevent re-entry
-      static bool scanInProgress = false;
-      if (scanInProgress) {
-        Serial.println("⚠️ WiFi scan already in progress, ignoring");
-        return;
-      }
-      scanInProgress = true;
-
-      // Do NOT deinit BLE here — causes deadlock/reboot on ESP32-S3
-      WiFi.mode(WIFI_STA);
-      WiFi.disconnect(true, true);
-      delay(200);
-
-      // Async scan to avoid blocking watchdog
-      int scanResult = WiFi.scanNetworks(true, true);
-      if (scanResult != WIFI_SCAN_RUNNING) {
-        Serial.println("❌ Failed to start WiFi scan");
-        c->setValue("WIFI_SCAN:ERROR");
-        c->notify();
-        scanInProgress = false;
+      if (wifiScanInProgress) {
+        Serial.println("⚠️ BLE WIFISCAN: scan already in progress, ignoring");
         return;
       }
 
-      unsigned long start = millis();
-      while (WiFi.scanComplete() == WIFI_SCAN_RUNNING && millis() - start < 8000) {
-        delay(50);
-        yield();
+      // Request scan and run it in a dedicated task to avoid crashes/reboots inside BLE callback
+      wifiScanRequested = true;
+
+      if (wifiScanTaskHandle == nullptr) {
+        xTaskCreatePinnedToCore(
+          wifiScanTask,
+          "wifiScanTask",
+          6144,
+          NULL,
+          1,
+          &wifiScanTaskHandle,
+          0
+        );
       }
 
-      int n = WiFi.scanComplete();
-      if (n <= 0) {
-        Serial.println("⚠️ BLE WIFISCAN: no networks found");
-        c->setValue("WIFI_SCAN:EMPTY");
-        c->notify();
-        WiFi.scanDelete();
-        scanInProgress = false;
-        return;
-      }
-
-      String result = "WIFI_SCAN:";
-      for (int i = 0; i < n; i++) {
-        result += WiFi.SSID(i);
-        if (i < n - 1) result += ",";
-      }
-
-      WiFi.scanDelete();
-
-      c->setValue(result.c_str());
-      c->notify();
-
-      Serial.print("📤 BLE WIFISCAN response sent: ");
-      Serial.println(result);
-
-      scanInProgress = false;
       return;
     }
 
@@ -1914,6 +1933,18 @@ void loop() {
   if (!isNetworkMode() && checkUpdateRunning) {
     Serial.println("⚠️ Forcing check-update stop (BLE mode)");
     checkUpdateRunning = false;
+  }
+  // If a scan was requested but the task isn't running (edge case), start it here.
+  if (wifiScanRequested && !wifiScanInProgress && wifiScanTaskHandle == nullptr) {
+    xTaskCreatePinnedToCore(
+      wifiScanTask,
+      "wifiScanTask",
+      6144,
+      NULL,
+      1,
+      &wifiScanTaskHandle,
+      0
+    );
   }
   // ================= RESET BUTTON HANDLING =================
   bool resetButtonState = digitalRead(resetButtonPin);
