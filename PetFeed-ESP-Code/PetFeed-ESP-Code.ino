@@ -29,7 +29,7 @@
 #include <SPIFFS.h>
 #include <Update.h>
 
-#define FW_VERSION "1.4.4"
+#define FW_VERSION "1.4.5"
 #define FIRMWARE_DIR "/fw"
 
 String latestBinName = "";
@@ -63,9 +63,9 @@ bool autoUpdateEnabled = true;
 int preferredUpdateHour = 0;
 int preferredUpdateMinute = 1;
 
-// automatic update timing (TESTING = 1 minute)
+// automatic update timing (TESTING = 5 minutes)
 unsigned long lastAutoUpdateCheckMs = 0;
-const unsigned long AUTO_UPDATE_INTERVAL_MS = 60000;
+const unsigned long AUTO_UPDATE_INTERVAL_MS = 300000;
 
 // scheduling state
 bool autoUpdateScheduled = false;
@@ -1165,15 +1165,20 @@ void startWifiMode() {
   ArduinoOTA.setPassword("ota");
 
   ArduinoOTA.onStart([]() {
-    Serial.println("🔁 OTA update start");
+    Serial.println("🔁 OTA update start (silent)");
+    // Ensure no buzzer activity during OTA start
+    toneOff();
   });
 
   ArduinoOTA.onEnd([]() {
-    Serial.println("✅ OTA update complete");
+    Serial.println("✅ OTA update complete (silent)");
+    // Do not play any confirmation tones on OTA completion
+    toneOff();
   });
 
   ArduinoOTA.onError([](ota_error_t error) {
-    Serial.printf("❌ OTA error[%u]\n", error);
+    Serial.printf("❌ OTA error[%u] (silent)\n", error);
+    toneOff();
   });
 
   ArduinoOTA.begin();
@@ -1830,7 +1835,6 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks {
 
     c->setValue("WIFI_SAVED");
     c->notify();
-    confirmBeep();
 
     if (newMode == "cloud") {
       Serial.println("🔁 Rebooting into Cloud mode...");
