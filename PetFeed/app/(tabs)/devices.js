@@ -1,3 +1,4 @@
+const FAKE_BEEP_PREFS = false; // 🔧 TEMP — remove later
 import React, { useEffect, useState, useCallback } from "react";
 import {
   View,
@@ -10,40 +11,6 @@ import {
   Switch,
   ActivityIndicator,
 } from "react-native";
-  // --- Beep Settings helpers ---
-  async function loadBeepPrefs(host) {
-    setBeepLoading(true);
-    try {
-      console.log("[Beep] Requesting /buzzer-prefs");
-      const res = await fetch(`http://${host}.local/buzzer-prefs`);
-      const json = await res.json();
-      console.log("[Beep] Received prefs", json);
-      setBeepPrefs({
-        openClose: !!json.openClose,
-        schedule: !!json.schedule,
-        feeding: !!json.feeding,
-      });
-    } catch (e) {
-      Alert.alert("Failed", "Could not load beep settings from device.");
-    }
-    setBeepLoading(false);
-  }
-
-  async function saveBeepPrefs() {
-    if (!beepHost) return;
-    try {
-      console.log("[Beep] Sending prefs", beepPrefs);
-      await fetch(`http://${beepHost}.local/buzzer-prefs`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(beepPrefs),
-      });
-      setBeepDirty(false);
-      Alert.alert("Saved", "Beep settings updated.");
-    } catch {
-      Alert.alert("Failed", "Could not save beep settings.");
-    }
-  }
 import { Ionicons } from "@expo/vector-icons";
 import { useColorScheme } from "react-native";
 import { Colors } from "../../constants/theme";
@@ -73,19 +40,26 @@ async function pingHost(host) {
     console.log("[Devices] Requesting /ping for", host);
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), 2000);
-    const res = await fetch(`http://${host}.local/ping`, { signal: controller.signal });
+    const res = await fetch(`http://${host}.local/ping`, {
+      signal: controller.signal,
+    });
     if (!res.ok) throw new Error();
     console.log("[Devices] Requesting /version for", host);
-    const vRes = await fetch(`http://${host}.local/version`, { signal: controller.signal });
+    const vRes = await fetch(`http://${host}.local/version`, {
+      signal: controller.signal,
+    });
     clearTimeout(t);
     const vJson = await vRes.json();
     return { online: true, firmware: vJson.version };
   } catch (e) {
-    console.log("[Devices] /ping or /version failed for", host, e?.message || e);
+    console.log(
+      "[Devices] /ping or /version failed for",
+      host,
+      e?.message || e
+    );
     return { online: false, firmware: "unavailable" };
   }
 }
-
 
 export default function DevicesScreen() {
   // Beep Settings modal state
@@ -98,6 +72,63 @@ export default function DevicesScreen() {
   });
   const [beepDirty, setBeepDirty] = useState(false);
   const [beepHost, setBeepHost] = useState(null);
+
+  // --- Beep Settings helpers ---
+  async function loadBeepPrefs(host) {
+    setBeepLoading(true);
+
+    // 🔧 TEMP FAKE PREFS FOR TESTING
+    if (FAKE_BEEP_PREFS) {
+      console.log("[Beep][FAKE] Returning fake buzzer prefs");
+
+      setTimeout(() => {
+        setBeepPrefs({
+          openClose: true,
+          schedule: true,
+          feeding: true,
+        });
+        setBeepLoading(false);
+      }, 600);
+
+      return;
+    }
+
+    // ---- REAL ESP LOGIC ----
+    try {
+      console.log("[Beep] Requesting /buzzer-prefs");
+      const res = await fetch(`http://${host}.local/buzzer-prefs`);
+      const json = await res.json();
+      console.log("[Beep] Received prefs", json);
+
+      setBeepPrefs({
+        openClose: !!json.openClose,
+        schedule: !!json.scheduleChange,
+        feeding: !!json.scheduledFeed,
+      });
+    } catch (e) {
+      console.error("[Beep] Failed to load prefs", e);
+      Alert.alert("Failed", "Could not load beep settings from device.");
+    } finally {
+      setBeepLoading(false);
+    }
+  }
+
+  async function saveBeepPrefs() {
+    if (!beepHost) return;
+    try {
+      console.log("[Beep] POST /buzzer-prefs body", beepPrefs);
+      await fetch(`http://${beepHost}.local/buzzer-prefs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(beepPrefs),
+      });
+      setBeepDirty(false);
+      Alert.alert("Saved", "Beep settings updated.");
+    } catch (e) {
+      console.error("[Beep] Failed to save prefs", e);
+      Alert.alert("Failed", "Could not save beep settings.");
+    }
+  }
   const router = useRouter();
   const scheme = useColorScheme() ?? "light";
   const colors = Colors[scheme];
@@ -111,8 +142,6 @@ export default function DevicesScreen() {
   // Modal state for adding local device
   const [addingLocalDevice, setAddingLocalDevice] = useState(null);
   const [localDeviceName, setLocalDeviceName] = useState("");
-
-
 
   const loadDevices = useCallback(async () => {
     const saved = await AsyncStorage.getItem(STORAGE_KEY);
@@ -148,6 +177,11 @@ export default function DevicesScreen() {
   //       host: "petfeeder-kitchen",
   //       mode: "wifi",
   //       online: true,
+  //       beepPrefs: {
+  //         openClose: true,
+  //         schedule: true,
+  //         feeding: true,
+  //       },
   //     },
   //     {
   //       id: "FAKE-DEVICE-002",
@@ -155,6 +189,11 @@ export default function DevicesScreen() {
   //       host: "petfeeder-garden",
   //       mode: "local",
   //       online: false,
+  //       beepPrefs: {
+  //         openClose: true,
+  //         schedule: true,
+  //         feeding: true,
+  //       },
   //     },
   //   ]);
 
@@ -227,12 +266,13 @@ export default function DevicesScreen() {
   //   }, [])
   // );
 
-
   useEffect(() => {
     (async () => {
       if (!devices.length) return;
 
-      console.log("[Devices] Initial screen load: fetching /ping + /version for all devices");
+      console.log(
+        "[Devices] Initial screen load: fetching /ping + /version for all devices"
+      );
 
       const updated = await Promise.all(
         devices.map(async (d) => {
@@ -251,8 +291,8 @@ export default function DevicesScreen() {
       setDevices(updated);
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
     })();
-  // run ONLY once on screen mount
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // run ONLY once on screen mount
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // 🔁 Poll device version every 5 seconds while on Devices screen
@@ -286,7 +326,9 @@ export default function DevicesScreen() {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
 
-    console.log("[Devices] Pull-to-refresh: fetching /ping + /version for all devices");
+    console.log(
+      "[Devices] Pull-to-refresh: fetching /ping + /version for all devices"
+    );
 
     const updated = await Promise.all(
       devices.map(async (d) => {
@@ -397,6 +439,14 @@ export default function DevicesScreen() {
       {
         text: "Update Settings",
         onPress: () => {
+          if (!device.online) {
+            Alert.alert(
+              "Device offline",
+              "Update settings can only be accessed while the device is online."
+            );
+            return;
+          }
+
           router.push({
             pathname: "/(device-setup)/updates",
             params: { host: device.host, name: device.name },
@@ -407,6 +457,13 @@ export default function DevicesScreen() {
       {
         text: "Beep Settings",
         onPress: async () => {
+          if (!device.online) {
+            Alert.alert(
+              "Device offline",
+              "Beep settings can only be changed while the device is online."
+            );
+            return;
+          }
           setBeepHost(device.host);
           setShowBeepModal(true);
           setBeepDirty(false);
@@ -523,7 +580,13 @@ Firmware: ${device.firmware || "Unknown"}`,
               <Text style={[styles.deviceName, { color: colors.text }]}>
                 {device.name}
               </Text>
-              <View style={{ flexDirection: "row", alignItems: "center", flexWrap: "wrap" }}>
+              <View
+                style={{
+                  flexDirection: "row",
+                  alignItems: "center",
+                  flexWrap: "wrap",
+                }}
+              >
                 <Text style={{ color: colors.textSecondary, fontSize: 14 }}>
                   {isActive ? "Selected" : "Not selected"} ·{" "}
                   {device.online ? "Online" : "Offline"}
@@ -542,8 +605,17 @@ Firmware: ${device.firmware || "Unknown"}`,
             </View>
 
             <View style={{ alignItems: "flex-end", marginLeft: 12 }}>
-              <Text style={{ color: colors.textSecondary, fontSize: 13, marginBottom: 6 }}>
-                Version {device.firmware === "unavailable" ? "Unavailable" : device.firmware}
+              <Text
+                style={{
+                  color: colors.textSecondary,
+                  fontSize: 13,
+                  marginBottom: 6,
+                }}
+              >
+                Version{" "}
+                {device.firmware === "unavailable"
+                  ? "Unavailable"
+                  : device.firmware}
               </Text>
 
               <View style={styles.inlineActions}>
@@ -872,6 +944,7 @@ Firmware: ${device.firmware || "Unknown"}`,
                   >
                     <Text style={{ color: colors.text }}>{item.label}</Text>
                     <Switch
+                      disabled={beepLoading}
                       value={beepPrefs[item.key]}
                       onValueChange={(v) => {
                         setBeepPrefs((p) => ({ ...p, [item.key]: v }));
@@ -903,7 +976,9 @@ Firmware: ${device.firmware || "Unknown"}`,
               onPress={() => setShowBeepModal(false)}
               style={{ marginTop: 12 }}
             >
-              <Text style={{ color: colors.textSecondary, textAlign: "center" }}>
+              <Text
+                style={{ color: colors.textSecondary, textAlign: "center" }}
+              >
                 Close
               </Text>
             </TouchableOpacity>

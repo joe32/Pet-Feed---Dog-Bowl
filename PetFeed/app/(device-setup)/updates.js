@@ -437,6 +437,31 @@ export default function UpdatesScreen() {
           </Text>
         </View>
 
+        {scheduledUpdate?.scheduled && (
+          <View
+            style={[
+              styles.card,
+              {
+                backgroundColor: colors.card,
+                borderWidth: 1,
+                borderColor: colors.tint,
+              },
+            ]}
+          >
+            <Text style={[styles.updateTitle, { color: colors.text }]}>Update scheduled</Text>
+
+            <Text style={{ color: colors.textSecondary }}>
+              {scheduledUpdate?.latest
+                ? `Version v${scheduledUpdate.latest} is scheduled to install.`
+                : "An update is scheduled to install."}
+            </Text>
+
+            <Text style={{ color: colors.text, fontWeight: "700", marginTop: 8 }}>
+              {scheduledUpdate?.time ? `Scheduled for ${scheduledUpdate.time}` : "Scheduled time unavailable"}
+            </Text>
+          </View>
+        )}
+
 
         {updating && (
           <View style={[styles.card, { backgroundColor: colors.card }]}>
@@ -566,7 +591,12 @@ export default function UpdatesScreen() {
               <DateTimePicker
                 value={
                   preferredTime
-                    ? new Date(`1970-01-01T${preferredTime}:00`)
+                    ? (() => {
+                        const [h, m] = preferredTime.split(":").map(Number);
+                        const d = new Date();
+                        d.setHours(h, m, 0, 0);
+                        return d;
+                      })()
                     : new Date()
                 }
                 mode="time"
