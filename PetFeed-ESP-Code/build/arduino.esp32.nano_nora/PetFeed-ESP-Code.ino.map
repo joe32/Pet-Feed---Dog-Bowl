@@ -47881,15 +47881,10 @@ LOAD /Users/joewilson/Library/Arduino15/packages/esp32/tools/s3-gcc/2021r2-p5/bi
  .data.resetButtonLast
                 0x000000003fc96f08        0x1 /Users/joewilson/Library/Caches/arduino/sketches/F0CFE5FF68288D729C06B0BD16D60AB2/sketch/PetFeed-ESP-Code.ino.cpp.o
                 0x000000003fc96f08                resetButtonLast
- .data.beepOnScheduledFeed
-                0x000000003fc96f09        0x1 /Users/joewilson/Library/Caches/arduino/sketches/F0CFE5FF68288D729C06B0BD16D60AB2/sketch/PetFeed-ESP-Code.ino.cpp.o
-                0x000000003fc96f09                beepOnScheduledFeed
  .data.beepOnScheduleChange
-                0x000000003fc96f0a        0x1 /Users/joewilson/Library/Caches/arduino/sketches/F0CFE5FF68288D729C06B0BD16D60AB2/sketch/PetFeed-ESP-Code.ino.cpp.o
-                0x000000003fc96f0a                beepOnScheduleChange
- .data.beepOnManualOpenClose
-                0x000000003fc96f0b        0x1 /Users/joewilson/Library/Caches/arduino/sketches/F0CFE5FF68288D729C06B0BD16D60AB2/sketch/PetFeed-ESP-Code.ino.cpp.o
-                0x000000003fc96f0b                beepOnManualOpenClose
+                0x000000003fc96f09        0x1 /Users/joewilson/Library/Caches/arduino/sketches/F0CFE5FF68288D729C06B0BD16D60AB2/sketch/PetFeed-ESP-Code.ino.cpp.o
+                0x000000003fc96f09                beepOnScheduleChange
+ *fill*         0x000000003fc96f0a        0x2 
  .data.currentAngle
                 0x000000003fc96f0c        0x4 /Users/joewilson/Library/Caches/arduino/sketches/F0CFE5FF68288D729C06B0BD16D60AB2/sketch/PetFeed-ESP-Code.ino.cpp.o
                 0x000000003fc96f0c                currentAngle
@@ -49094,10 +49089,16 @@ LOAD /Users/joewilson/Library/Arduino15/packages/esp32/tools/s3-gcc/2021r2-p5/bi
  .bss.resetButtonPressStart
                 0x000000003fc9cd00        0x4 /Users/joewilson/Library/Caches/arduino/sketches/F0CFE5FF68288D729C06B0BD16D60AB2/sketch/PetFeed-ESP-Code.ino.cpp.o
                 0x000000003fc9cd00                resetButtonPressStart
- .bss.lidIsOpen
+ .bss.beepOnScheduledFeed
                 0x000000003fc9cd04        0x1 /Users/joewilson/Library/Caches/arduino/sketches/F0CFE5FF68288D729C06B0BD16D60AB2/sketch/PetFeed-ESP-Code.ino.cpp.o
-                0x000000003fc9cd04                lidIsOpen
- *fill*         0x000000003fc9cd05        0x3 
+                0x000000003fc9cd04                beepOnScheduledFeed
+ .bss.beepOnManualOpenClose
+                0x000000003fc9cd05        0x1 /Users/joewilson/Library/Caches/arduino/sketches/F0CFE5FF68288D729C06B0BD16D60AB2/sketch/PetFeed-ESP-Code.ino.cpp.o
+                0x000000003fc9cd05                beepOnManualOpenClose
+ .bss.lidIsOpen
+                0x000000003fc9cd06        0x1 /Users/joewilson/Library/Caches/arduino/sketches/F0CFE5FF68288D729C06B0BD16D60AB2/sketch/PetFeed-ESP-Code.ino.cpp.o
+                0x000000003fc9cd06                lidIsOpen
+ *fill*         0x000000003fc9cd07        0x1 
  .bss.myServo   0x000000003fc9cd08       0x48 /Users/joewilson/Library/Caches/arduino/sketches/F0CFE5FF68288D729C06B0BD16D60AB2/sketch/PetFeed-ESP-Code.ino.cpp.o
                 0x000000003fc9cd08                myServo
  .bss.scheduleExecutedToday

@@ -29,7 +29,7 @@
 #include <SPIFFS.h>
 #include <Update.h>
 
-#define FW_VERSION "1.3.8"
+#define FW_VERSION "1.3.9"
 #define FIRMWARE_DIR "/fw"
 
 String latestBinName = "";
@@ -757,9 +757,9 @@ const int buzzerResolution = 8;
 
 // ===== BUZZER PREFS =====
 // These are persisted (survive reboot/OTA). Defaults are ON.
-bool beepOnManualOpenClose = true;   // open/close button presses
+bool beepOnManualOpenClose = false;   // open/close button presses
 bool beepOnScheduleChange  = true;   // schedule/cancel schedule actions
-bool beepOnScheduledFeed   = true;   // scheduled feeding alert beeps
+bool beepOnScheduledFeed   = false;   // scheduled feeding alert beeps
 
 void saveBuzzerPrefs() {
   prefs.begin("petfeed", false);
