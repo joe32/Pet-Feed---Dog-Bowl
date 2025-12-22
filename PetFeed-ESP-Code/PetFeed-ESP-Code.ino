@@ -1343,11 +1343,13 @@ void startWifiMode() {
     if (doc.containsKey("openClose")) {
       beepOnManualOpenClose = doc["openClose"];
     }
-    if (doc.containsKey("scheduleChange")) {
-      beepOnScheduleChange = doc["scheduleChange"];
+
+    if (doc.containsKey("schedule")) {
+      beepOnScheduleChange = doc["schedule"];
     }
-    if (doc.containsKey("scheduledFeed")) {
-      beepOnScheduledFeed = doc["scheduledFeed"];
+
+    if (doc.containsKey("feeding")) {
+      beepOnScheduledFeed = doc["feeding"];
     }
 
     saveBuzzerPrefs();

@@ -64,7 +64,7 @@ export default function AddDeviceScreen() {
   const [wifiScanStarted, setWifiScanStarted] = useState(false);
 
   // TEMP – force Wi-Fi popup + fake networks (REMOVE LATER)
-  
+
   // useEffect(() => {
   //   setSetupStep("wifi");
   //   setWifiScanStarted(true);
@@ -429,12 +429,12 @@ export default function AddDeviceScreen() {
                 Choose connection type
               </Text>
               {[
-                { key: "wifi", label: "Wi‑Fi (local)", enabled: true },
                 {
                   key: "cloud",
-                  label: "Cloud (control from anywhere)",
-                  enabled: false,
+                  label: "Cloud (control from anywhere) - Recomended",
+                  enabled: true,
                 },
+                { key: "wifi", label: "Wi‑Fi (local)", enabled: true },
               ].map((option) => (
                 <TouchableOpacity
                   key={option.key}
