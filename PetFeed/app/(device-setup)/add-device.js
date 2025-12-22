@@ -81,9 +81,9 @@ export default function AddDeviceScreen() {
   // (REMOVED: auto-start Wi-Fi scan when modal appears)
 
   // TEMP: force connection mode popup on load (REMOVE AFTER TESTING)
-  useEffect(() => {
-    setSetupStep("mode");
-  }, []);
+  // useEffect(() => {
+  //   setSetupStep("mode");
+  // }, []);
 
   async function scanWifiNetworks() {
     // Bump sequence so older scans are ignored
@@ -731,8 +731,16 @@ export default function AddDeviceScreen() {
                   setRebooting(true);
 
                   try {
+                    const modeToSend = connectionMode === "cloud" ? "cloud" : "wifi";
+
+                    console.log("[SETUP] Sending provisioning payload to ESP:", {
+                      ssid,
+                      host: generatedHost,
+                      mode: modeToSend,
+                    });
+
                     await sendWifiCredentials(
-                      `WIFI:ssid=${ssid};pass=${password};host=${generatedHost}`
+                      `WIFI:ssid=${ssid};pass=${password};host=${generatedHost};mode=${modeToSend}`
                     );
                   } catch (e) {
                     console.log("BLE ended after Wi‑Fi write (expected):", e);

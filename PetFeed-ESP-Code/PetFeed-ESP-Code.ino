@@ -29,7 +29,7 @@
 #include <SPIFFS.h>
 #include <Update.h>
 
-#define FW_VERSION "1.4.1"
+#define FW_VERSION "1.4.2"
 #define FIRMWARE_DIR "/fw"
 
 String latestBinName = "";
@@ -469,6 +469,10 @@ String wifiPASS = "";
 String mdnsHost = "";
 String deviceMode = "ble";
 
+bool isNetworkMode() {
+  return deviceMode == "wifi" || deviceMode == "cloud";
+}
+
 WiFiUDP discoveryUdp;
 const uint16_t DISCOVERY_PORT = 4210;
 unsigned long lastDiscoveryBroadcast = 0;
@@ -670,7 +674,7 @@ void otaTask(void *param) {
 
 void serverTask(void *param) {
   for (;;) {
-    if (deviceMode == "wifi") {
+    if (isNetworkMode()) {
       server.handleClient();
       ArduinoOTA.handle();
     }
@@ -1736,6 +1740,7 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks {
     int s1 = cmd.indexOf("ssid=");
     int p1 = cmd.indexOf("pass=");
     int h1 = cmd.indexOf("host=");
+    int m1 = cmd.indexOf("mode=");
 
     if (s1 >= 0) {
       int end = cmd.indexOf(";", s1);
@@ -1758,6 +1763,24 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks {
       mdnsHost = cmd.substring(h1 + 5, end);
     }
 
+    String newMode = "wifi"; // default
+
+    if (m1 >= 0) {
+      int end = cmd.indexOf(";", m1);
+      if (end < 0)
+        end = cmd.length();
+      newMode = cmd.substring(m1 + 5, end);
+      newMode.trim();
+      newMode.toLowerCase();
+
+      // allow only supported values
+      if (newMode != "wifi" && newMode != "cloud") {
+        Serial.print("⚠️ Unknown mode received, defaulting to wifi: ");
+        Serial.println(newMode);
+        newMode = "wifi";
+      }
+    }
+
     // HARD GUARD: if SSID accidentally contains "WIFI:ssid=", strip it
     if (wifiSSID.startsWith("WIFI:ssid=")) {
       wifiSSID.replace("WIFI:ssid=", "");
@@ -1770,6 +1793,8 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks {
     Serial.println(wifiPASS.length());
     Serial.print("HOST: ");
     Serial.println(mdnsHost);
+    Serial.print("MODE: ");
+    Serial.println(newMode);
 
     if (!wifiSSID.length() || !wifiPASS.length()) {
       Serial.println("❌ Invalid Wi‑Fi credentials received, aborting");
@@ -1780,7 +1805,7 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks {
     prefs.putString("ssid", wifiSSID);
     prefs.putString("pass", wifiPASS);
     prefs.putString("host", mdnsHost);
-    prefs.putString("mode", "wifi");
+    prefs.putString("mode", newMode);
     prefs.putBool("wifiCredsPending", true);
     prefs.end();
 
@@ -1788,7 +1813,11 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks {
     c->notify();
     confirmBeep();
 
-    Serial.println("🔁 Rebooting into Wi‑Fi mode...");
+    if (newMode == "cloud") {
+      Serial.println("🔁 Rebooting into Cloud mode...");
+    } else {
+      Serial.println("🔁 Rebooting into Wi‑Fi mode...");
+    }
     Serial.flush();
     delay(1500);
     ESP.restart();
@@ -1881,8 +1910,8 @@ void setup() {
 
 // ================= LOOP =================
 void loop() {
-  // Safety guard: NEVER allow check-update during BLE mode
-  if (deviceMode != "wifi" && checkUpdateRunning) {
+  // Safety guard: NEVER allow network tasks during BLE-only mode
+  if (!isNetworkMode() && checkUpdateRunning) {
     Serial.println("⚠️ Forcing check-update stop (BLE mode)");
     checkUpdateRunning = false;
   }
@@ -2038,7 +2067,7 @@ void loop() {
   // ================= AUTO UPDATE CHECK (EVERY 1 MIN - TESTING) =================
   // IMPORTANT: never run the HTTP update check on the main loop (can trigger watchdog / reboots).
   // Always run it in the existing FreeRTOS task, and never while OTA is running.
-  if (deviceMode == "wifi") {
+  if (isNetworkMode()) {
     if (!autoUpdateEnabled) {
       autoUpdateScheduled = false;
       autoUpdateStarted = false;
@@ -2077,7 +2106,7 @@ void loop() {
   }
 
   // Print time once per minute, exactly at :00 seconds (non-blocking)
-  if (deviceMode == "wifi") {
+  if (isNetworkMode()) {
     struct tm t;
     if (getLocalTime(&t)) {
       if (t.tm_sec == 0 && (t.tm_min != lastPrintedMinute || t.tm_hour != lastPrintedHour)) {
@@ -2156,7 +2185,7 @@ void loop() {
 
   // server.handleClient() and ArduinoOTA.handle() now run in FreeRTOS serverTask
 
-  if (deviceMode == "wifi" && millis() - lastDiscoveryBroadcast > 6000) {
+  if (isNetworkMode() && millis() - lastDiscoveryBroadcast > 6000) {
     lastDiscoveryBroadcast = millis();
 
     String host = mdnsHost.length() ? mdnsHost : "petfeeder";
