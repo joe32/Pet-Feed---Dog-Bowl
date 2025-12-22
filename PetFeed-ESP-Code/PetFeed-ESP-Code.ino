@@ -29,7 +29,7 @@
 #include <SPIFFS.h>
 #include <Update.h>
 
-#define FW_VERSION "1.3.5"
+#define FW_VERSION "1.3.6"
 #define FIRMWARE_DIR "/fw"
 
 String latestBinName = "";
@@ -1572,7 +1572,7 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks {
       int scanResult = WiFi.scanNetworks(true, true);
       if (scanResult != WIFI_SCAN_RUNNING) {
         Serial.println("❌ Failed to start WiFi scan");
-        c->setValue("WIFISCAN:ERROR");
+        c->setValue("WIFI_SCAN:ERROR");
         c->notify();
         scanInProgress = false;
         return;
@@ -1587,14 +1587,14 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks {
       int n = WiFi.scanComplete();
       if (n <= 0) {
         Serial.println("⚠️ BLE WIFISCAN: no networks found");
-        c->setValue("WIFISCAN:EMPTY");
+        c->setValue("WIFI_SCAN:EMPTY");
         c->notify();
         WiFi.scanDelete();
         scanInProgress = false;
         return;
       }
 
-      String result = "WIFISCAN:";
+      String result = "WIFI_SCAN:";
       for (int i = 0; i < n; i++) {
         result += WiFi.SSID(i);
         if (i < n - 1) result += ",";
