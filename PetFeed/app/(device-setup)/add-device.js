@@ -81,9 +81,9 @@ export default function AddDeviceScreen() {
   // (REMOVED: auto-start Wi-Fi scan when modal appears)
 
   // TEMP: force connection mode popup on load (REMOVE AFTER TESTING)
-  useEffect(() => {
-    setSetupStep("mode");
-  }, []);
+  // useEffect(() => {
+  //   setSetupStep("mode");
+  // }, []);
 
   async function scanWifiNetworks() {
     // Bump sequence so older scans are ignored
