@@ -27,8 +27,9 @@
 #include <WiFiUdp.h>
 #include <HTTPClient.h>
 #include <SPIFFS.h>
+#include <Update.h>
 
-#define FW_VERSION "1.3.3"
+#define FW_VERSION "1.3.4"
 #define FIRMWARE_DIR "/fw"
 
 String latestBinName = "";
@@ -57,20 +58,38 @@ bool checkUpdateRunning = false;
 TaskHandle_t checkUpdateTaskHandle = nullptr;
 
 // ===== AUTO UPDATE PREFS =====
-bool autoUpdateEnabled = false;
-int preferredUpdateHour = -1;
-int preferredUpdateMinute = -1;
+// Defaults: auto updates ON, preferred time 00:01 (12:01am)
+bool autoUpdateEnabled = true;
+int preferredUpdateHour = 0;
+int preferredUpdateMinute = 1;
 
-// automatic update timing (TESTING = 30 seconds)
+// automatic update timing (TESTING = 1 minute)
 unsigned long lastAutoUpdateCheckMs = 0;
-const unsigned long AUTO_UPDATE_INTERVAL_MS = 30000;
+const unsigned long AUTO_UPDATE_INTERVAL_MS = 60000;
 
 // scheduling state
 bool autoUpdateScheduled = false;
 int scheduledUpdateHour = -1;
 int scheduledUpdateMinute = -1;
-bool autoUpdateExecutedToday = false;
-bool autoUpdateStarted = false; // prevents missing tm_sec==0 / double-start within the same minute
+int scheduledUpdateDayOfYear = -1;   // day-of-year the schedule is intended for
+bool autoUpdateStarted = false;      // prevents double-start within the same minute
+
+// If an auto update attempt fails, we want to be able to reschedule and try again
+unsigned long lastAutoUpdateAttemptMs = 0;
+const unsigned long AUTO_UPDATE_RETRY_BACKOFF_MS = 5 * 60 * 1000; // 5 minutes
+
+void clearAutoUpdateSchedule(const char *reason) {
+  if (autoUpdateScheduled || scheduledUpdateHour != -1 || scheduledUpdateMinute != -1) {
+    Serial.print("🧹 AUTO UPDATE: clearing schedule (");
+    Serial.print(reason);
+    Serial.println(")");
+  }
+  autoUpdateScheduled = false;
+  scheduledUpdateHour = -1;
+  scheduledUpdateMinute = -1;
+  scheduledUpdateDayOfYear = -1;
+  autoUpdateStarted = false;
+}
 
 // auto-check task coordination
 bool autoUpdateCheckPending = false;
@@ -247,8 +266,20 @@ bool installFirmwareFromSPIFFS(int targetIndex) {
     return false;
   }
 
-  Update.writeStream(file);
+  size_t written = Update.writeStream(file);
   file.close();
+
+  if (written != size) {
+    Serial.println("❌ Update writeStream incomplete");
+    Serial.print("Expected bytes: ");
+    Serial.println((int)size);
+    Serial.print("Written bytes: ");
+    Serial.println((int)written);
+    otaStatus = "error";
+    otaMessage = "Install failed";
+    Update.abort();
+    return false;
+  }
 
   if (!Update.end(true)) {
     Serial.print("❌ Update failed: ");
@@ -295,6 +326,15 @@ bool downloadFirmware(const String &binName) {
   int totalSize = http.getSize();  // bytes, may be -1 if unknown
   unsigned long lastPrintMs = 0;
 
+  // Require a known Content-Length so we can guarantee full download
+  if (code == HTTP_CODE_OK) {
+    if (totalSize <= 0) {
+      Serial.println("❌ Download failed: missing/invalid Content-Length");
+      http.end();
+      return false;
+    }
+  }
+
   if (code != HTTP_CODE_OK) {
     Serial.print("❌ HTTP error: ");
     Serial.println(code);
@@ -310,11 +350,37 @@ bool downloadFirmware(const String &binName) {
   }
 
   WiFiClient *stream = http.getStreamPtr();
+  // Verify this looks like an ESP32 firmware image (first byte should be 0xE9)
+  // If GitHub returns HTML/text, this will fail and we abort rather than saving junk.
+  while (http.connected() && stream->available() == 0) {
+    delay(10);
+    yield();
+  }
+  int first = stream->read();
+  if (first < 0) {
+    Serial.println("❌ Download failed: no data received");
+    f.close();
+    http.end();
+    return false;
+  }
+  if ((uint8_t)first != 0xE9) {
+    Serial.println("❌ Download failed: not a firmware binary (bad header)");
+    Serial.print("First byte was 0x");
+    Serial.println((uint8_t)first, HEX);
+    f.close();
+    http.end();
+    SPIFFS.remove(localPath);
+    return false;
+  }
+  // Write the first byte we consumed
+  f.write((uint8_t)first);
+  int total = 1;
+
   uint8_t buffer[1024];
-  int total = 0;
+  // NOTE: total already initialised to 1 after writing the verified first byte
 
   // --- OTA stability fix: safer content-length-based download loop ---
-  while (http.connected() && (totalSize < 0 || total < totalSize)) {
+  while (http.connected() && (total < totalSize)) {
     size_t available = stream->available();
     if (!available) {
       delay(10);
@@ -349,13 +415,18 @@ bool downloadFirmware(const String &binName) {
   }
   // --- End OTA stability fix loop ---
 
-  // Final size verification
-  if (totalSize > 0 && total != totalSize) {
+  // Final size verification (must match Content-Length exactly)
+  if (total != totalSize) {
     Serial.println("❌ Download incomplete — size mismatch");
+    Serial.print("Expected bytes: ");
+    Serial.println(totalSize);
+    Serial.print("Received bytes: ");
+    Serial.println(total);
     otaStatus = "error";
     otaMessage = "Download incomplete";
     f.close();
     http.end();
+    SPIFFS.remove(localPath);
     return false;
   }
 
@@ -443,29 +514,39 @@ void checkUpdateTask(void *param) {
     autoCheckLatest = checkUpdateLatest;
   }
 
-  // ===== AUTO UPDATE SCHEDULING (FIXED) =====
+  // ===== AUTO UPDATE SCHEDULING =====
   if (isAuto && autoUpdateEnabled) {
     if (checkUpdateResult == "update_available") {
       Serial.print("🆕 AUTO UPDATE: update found ");
       Serial.println(checkUpdateLatest);
 
-      if (!autoUpdateScheduled &&
-          preferredUpdateHour >= 0 &&
-          preferredUpdateMinute >= 0) {
+      // (Re)create a schedule if none exists or if schedule is stale
+      if (preferredUpdateHour >= 0 && preferredUpdateMinute >= 0) {
+        // Only schedule if we don't already have a schedule, or if it was for a previous day
+        struct tm nowT;
+        int today = -1;
+        if (getLocalTime(&nowT)) {
+          today = nowT.tm_yday;
+        }
 
-        scheduledUpdateHour = preferredUpdateHour;
-        scheduledUpdateMinute = preferredUpdateMinute;
-        autoUpdateScheduled = true;
-        autoUpdateExecutedToday = false;
-        autoUpdateStarted = false;
+        bool stale = (scheduledUpdateDayOfYear != -1 && today != -1 && scheduledUpdateDayOfYear != today);
+        if (!autoUpdateScheduled || stale) {
+          scheduledUpdateHour = preferredUpdateHour;
+          scheduledUpdateMinute = preferredUpdateMinute;
+          scheduledUpdateDayOfYear = (today != -1) ? today : -1;
+          autoUpdateScheduled = true;
+          autoUpdateStarted = false;
 
-        Serial.print("⏳ AUTO UPDATE: scheduled for ");
-        Serial.printf("%02d:%02d\n", scheduledUpdateHour, scheduledUpdateMinute);
+          Serial.print("⏳ AUTO UPDATE: scheduled for ");
+          Serial.printf("%02d:%02d\n", scheduledUpdateHour, scheduledUpdateMinute);
+        }
       }
     } else if (checkUpdateResult == "up_to_date") {
       Serial.println("✅ AUTO UPDATE: already up to date");
+      clearAutoUpdateSchedule("up-to-date");
     } else {
       Serial.println("⚠️ AUTO UPDATE: check failed");
+      // Do not clear schedule here; allow existing schedule to remain
     }
   }
 
@@ -536,18 +617,18 @@ void checkLatestRelease() {
   }
 }
 
-void fullAutoUpdate() {
+bool fullAutoUpdate() {
   Serial.println("🔎 Checking for latest firmware...");
   checkLatestRelease();
 
   if (latestBinName.length() == 0) {
     Serial.println("❌ No update info available");
-    return;
+    return false;
   }
 
   if (latestVersionName == String(FW_VERSION)) {
     Serial.println("✅ Already on latest firmware");
-    return;
+    return true;
   }
 
   // Store latestBinName in a local variable
@@ -558,23 +639,31 @@ void fullAutoUpdate() {
 
   if (!downloadFirmware(downloadedBin)) {
     Serial.println("❌ Download failed");
-    return;
+    return false;
   }
 
   // Find the index of the downloaded firmware
   int foundIndex = findFirmwareIndexByName(downloadedBin);
   if (foundIndex == -1) {
     Serial.println("❌ Downloaded firmware file not found in SPIFFS");
-    return;
+    return false;
   }
-  installFirmwareFromSPIFFS(foundIndex);
+  bool installed = installFirmwareFromSPIFFS(foundIndex);
+  return installed;
 }
 
 // ===== OTA FreeRTOS Task Wrapper =====
 void otaTask(void *param) {
   otaRunning = true;
-  fullAutoUpdate();
+  bool ok = fullAutoUpdate();
   otaRunning = false;
+
+  // If an automatic update attempt failed, allow retry/reschedule after backoff
+  if (!ok) {
+    lastAutoUpdateAttemptMs = millis();
+    Serial.println("❌ AUTO UPDATE: OTA attempt failed");
+  }
+
   otaTaskHandle = nullptr;
   vTaskDelete(NULL);
 }
@@ -748,11 +837,28 @@ void saveAutoUpdatePrefs() {
 }
 
 void loadAutoUpdatePrefs() {
+  // Use compile-time defaults unless prefs explicitly override them
   prefs.begin("petfeed", true);
-  autoUpdateEnabled = prefs.getBool("autoUpd", false);
-  preferredUpdateHour = prefs.getInt("updHour", -1);
-  preferredUpdateMinute = prefs.getInt("updMin", -1);
+
+  // If keys don't exist yet (fresh device / after prefs.clear), keep defaults
+  if (prefs.isKey("autoUpd")) {
+    autoUpdateEnabled = prefs.getBool("autoUpd", autoUpdateEnabled);
+  }
+  if (prefs.isKey("updHour")) {
+    preferredUpdateHour = prefs.getInt("updHour", preferredUpdateHour);
+  }
+  if (prefs.isKey("updMin")) {
+    preferredUpdateMinute = prefs.getInt("updMin", preferredUpdateMinute);
+  }
+
   prefs.end();
+
+  // Safety clamp
+  if (preferredUpdateHour < 0 || preferredUpdateHour > 23 || preferredUpdateMinute < 0 || preferredUpdateMinute > 59) {
+    autoUpdateEnabled = true;
+    preferredUpdateHour = 0;
+    preferredUpdateMinute = 1;
+  }
 }
 
 // ================= HELPER: NOTIFY SCHEDULE =================
@@ -829,6 +935,15 @@ void factoryReset() {
   prefs.begin("petfeed", false);
   prefs.clear();
   prefs.end();
+
+  // Re-apply default auto-update prefs after factory reset
+  autoUpdateEnabled = true;
+  preferredUpdateHour = 0;
+  preferredUpdateMinute = 1;
+  saveAutoUpdatePrefs();
+
+  // Clear any in-memory scheduled auto update
+  clearAutoUpdateSchedule("factory reset");
 
   mdnsHost = "";
 
@@ -1126,6 +1241,28 @@ void startWifiMode() {
     }
 
     saveAutoUpdatePrefs();
+
+    // If user changes auto-update settings/time, cancel any existing scheduled update.
+    // If an update is currently available, immediately schedule again for the new preferred time.
+    clearAutoUpdateSchedule("prefs changed");
+
+    if (autoUpdateEnabled && checkUpdateResult == "update_available" && preferredUpdateHour >= 0 && preferredUpdateMinute >= 0) {
+      struct tm nowT;
+      int today = -1;
+      if (getLocalTime(&nowT)) {
+        today = nowT.tm_yday;
+      }
+
+      scheduledUpdateHour = preferredUpdateHour;
+      scheduledUpdateMinute = preferredUpdateMinute;
+      scheduledUpdateDayOfYear = (today != -1) ? today : -1;
+      autoUpdateScheduled = true;
+      autoUpdateStarted = false;
+
+      Serial.print("⏳ AUTO UPDATE: re-scheduled for ");
+      Serial.printf("%02d:%02d\n", scheduledUpdateHour, scheduledUpdateMinute);
+    }
+
     Serial.println("✅ Auto‑update preferences saved and acknowledged to app");
     server.send(200, "application/json", "{\"status\":\"saved\"}");
   });
@@ -1181,9 +1318,7 @@ void startWifiMode() {
   server.on("/update", HTTP_POST, []() {
     Serial.println("📥 HTTP /update called");
     // If user manually updates, cancel any pending automatic schedule
-    autoUpdateScheduled = false;
-    scheduledUpdateHour = -1;
-    scheduledUpdateMinute = -1;
+    clearAutoUpdateSchedule("manual update requested");
     autoUpdateCheckPending = false;
     if (!otaRunning && otaTaskHandle == nullptr) {
       otaStatus = "checking";
@@ -1760,15 +1895,20 @@ void loop() {
           autoCheckResult = "unknown";
           autoCheckLatest = "";
 
-          xTaskCreatePinnedToCore(
-            checkUpdateTask,
-            "checkUpdateTaskAuto",
-            6144,
-            (void*)1,   // <-- mark as AUTO
-            1,
-            &checkUpdateTaskHandle,
-            0
-          );
+          // If we recently failed an OTA attempt, avoid hammering; wait a short backoff
+          if (lastAutoUpdateAttemptMs > 0 && (millis() - lastAutoUpdateAttemptMs) < AUTO_UPDATE_RETRY_BACKOFF_MS) {
+            Serial.println("⏳ AUTO UPDATE: backoff active after failed OTA attempt");
+          } else {
+            xTaskCreatePinnedToCore(
+              checkUpdateTask,
+              "checkUpdateTaskAuto",
+              6144,
+              (void*)1,   // <-- mark as AUTO
+              1,
+              &checkUpdateTaskHandle,
+              0
+            );
+          }
         } else {
           Serial.println("⏸️ AUTO UPDATE: skipped (check already running)");
         }
@@ -1805,14 +1945,13 @@ void loop() {
       // Reset daily execution flags at midnight
       if (t.tm_hour == 0 && t.tm_min == 0 && t.tm_sec == 0) {
         scheduleExecutedToday = false;
-        autoUpdateExecutedToday = false;
         autoUpdateStarted = false;
+        scheduledUpdateDayOfYear = -1;
       }
 
       // ================= AUTO UPDATE EXECUTION =================
       if (autoUpdateScheduled &&
           autoUpdateEnabled &&
-          !autoUpdateExecutedToday &&
           !autoUpdateStarted &&
           preferredUpdateHour >= 0 &&
           preferredUpdateMinute >= 0 &&
@@ -1820,16 +1959,15 @@ void loop() {
           t.tm_hour == scheduledUpdateHour &&
           t.tm_min == scheduledUpdateMinute) {
 
-        Serial.println("🚀 AUTO UPDATE: scheduled time reached");
-        Serial.print("🕒 AUTO UPDATE about to start at ");
+        Serial.println("⏰ AUTO UPDATE: scheduled minute reached");
+        Serial.print("🕒 AUTO UPDATE: starting at ");
         Serial.printf("%02d:%02d:%02d\n", t.tm_hour, t.tm_min, t.tm_sec);
 
-        autoUpdateStarted = true;          // prevent double-trigger within the same minute
-        autoUpdateExecutedToday = true;
-        autoUpdateScheduled = false;
+        autoUpdateStarted = true;      // prevents double-trigger within the same minute
+        clearAutoUpdateSchedule("triggered");
 
         if (!otaRunning && otaTaskHandle == nullptr) {
-          Serial.println("🚀 AUTO UPDATE: starting OTA task now");
+          Serial.println("🚀 AUTO UPDATE: launching OTA task");
           otaStatus = "checking";
           otaMessage = "Automatic update started";
           xTaskCreatePinnedToCore(
@@ -1842,7 +1980,7 @@ void loop() {
             0
           );
         } else {
-          Serial.println("⚠️ AUTO UPDATE aborted: OTA already running");
+          Serial.println("⚠️ AUTO UPDATE: skipped (OTA already running)");
         }
       }
     }

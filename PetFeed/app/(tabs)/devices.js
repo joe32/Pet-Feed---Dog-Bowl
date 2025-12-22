@@ -54,37 +54,46 @@ async function pingHost(host) {
 // Helper to check update availability for a device
 async function checkUpdateForHost(host) {
   console.log("[Devices] Requesting /check-update for", host);
-  try {
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 3000);
 
-    const res = await fetch(`http://${host}.local/check-update`, {
-      signal: controller.signal,
-    });
+  const start = Date.now();
+  const TIMEOUT_MS = 10000;
 
-    clearTimeout(t);
+  while (Date.now() - start < TIMEOUT_MS) {
+    try {
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), 3000);
 
-    if (!res.ok) {
-      console.log("[Devices] /check-update non-200 for", host);
-      return { status: "unknown" };
+      const res = await fetch(`http://${host}.local/check-update`, {
+        signal: controller.signal,
+      });
+
+      clearTimeout(t);
+
+      if (!res.ok) {
+        await new Promise((r) => setTimeout(r, 500));
+        continue;
+      }
+
+      const json = await res.json();
+      console.log("[Devices] /check-update response for", host, json);
+
+      if (json.status === "available") {
+        return { status: "available", version: json.latest || json.version };
+      }
+
+      if (json.status === "up_to_date" || json.status === "up-to-date") {
+        return { status: "up-to-date" };
+      }
+
+      // ESP responded but not ready yet
+      await new Promise((r) => setTimeout(r, 500));
+    } catch (e) {
+      await new Promise((r) => setTimeout(r, 500));
     }
-
-    const json = await res.json();
-    console.log("[Devices] /check-update response for", host, json);
-
-    if (json.status === "available") {
-      return { status: "available", version: json.version };
-    }
-
-    if (json.status === "up-to-date") {
-      return { status: "up-to-date" };
-    }
-
-    return { status: "unknown" };
-  } catch (e) {
-    console.log("[Devices] /check-update failed for", host, e?.message || e);
-    return { status: "unknown" };
   }
+
+  console.log("[Devices] /check-update timed out for", host);
+  return { status: "unknown" };
 }
 
 export default function DevicesScreen() {
