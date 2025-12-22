@@ -81,9 +81,9 @@ export default function AddDeviceScreen() {
   // (REMOVED: auto-start Wi-Fi scan when modal appears)
 
   // TEMP: force connection mode popup on load (REMOVE AFTER TESTING)
-  // useEffect(() => {
-  //   setSetupStep("mode");
-  // }, []);
+  useEffect(() => {
+    setSetupStep("mode");
+  }, []);
 
   async function scanWifiNetworks() {
     // Bump sequence so older scans are ignored
@@ -434,12 +434,12 @@ export default function AddDeviceScreen() {
                 Choose connection type
               </Text>
               {[
+                { key: "wifi", label: "Wi‑Fi (local)", enabled: true },
                 {
                   key: "cloud",
-                  label: "Cloud (control from anywhere) - Recomended",
-                  enabled: true,
+                  label: "Cloud (control from anywhere) - Coming soon",
+                  enabled: false,
                 },
-                { key: "wifi", label: "Wi‑Fi (local)", enabled: true },
               ].map((option) => (
                 <TouchableOpacity
                   key={option.key}
