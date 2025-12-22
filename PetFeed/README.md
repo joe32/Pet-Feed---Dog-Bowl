@@ -8,6 +8,9 @@ build app:
 
 eas build --platform ios
 
+eas build --platform android --profile preview
+
+
 submit:
 
 eas submit --platform ios

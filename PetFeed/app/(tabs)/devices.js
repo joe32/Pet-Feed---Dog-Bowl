@@ -10,6 +10,8 @@ import {
   ScrollView,
   Switch,
   ActivityIndicator,
+  Platform,
+  TextInput,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useColorScheme } from "react-native";
@@ -72,6 +74,13 @@ export default function DevicesScreen() {
   });
   const [beepDirty, setBeepDirty] = useState(false);
   const [beepHost, setBeepHost] = useState(null);
+  // Android device-options modal state
+  const [showAndroidOptions, setShowAndroidOptions] = useState(false);
+  const [androidOptionsDevice, setAndroidOptionsDevice] = useState(null);
+  // Android rename modal state
+  const [showRenameModal, setShowRenameModal] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
+  const [renameDevice, setRenameDevice] = useState(null);
 
   // --- Beep Settings helpers ---
   async function loadBeepPrefs(host) {
@@ -418,6 +427,11 @@ export default function DevicesScreen() {
   }
 
   function openDeviceSettings(device) {
+    if (Platform.OS === "android") {
+      setAndroidOptionsDevice(device);
+      setShowAndroidOptions(true);
+      return;
+    }
     Alert.alert(device.name, "Choose an option", [
       {
         text: "Rename",
@@ -853,6 +867,121 @@ Firmware: ${device.firmware || "Unknown"}`,
           </TouchableOpacity>
         </View>
       </SafeAreaView>
+      {showAndroidOptions && androidOptionsDevice && (
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modal, { backgroundColor: colors.background }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>
+              {androidOptionsDevice.name}
+            </Text>
+            <Text style={{ color: colors.textSecondary, marginBottom: 16 }}>
+              Choose an option
+            </Text>
+
+            <TouchableOpacity
+              style={styles.modalButton}
+              onPress={() => {
+                setShowAndroidOptions(false);
+                setRenameDevice(androidOptionsDevice);
+                setRenameValue(androidOptionsDevice.name);
+                setShowRenameModal(true);
+              }}
+            >
+              <Text style={{ fontWeight: "600" }}>Rename</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.modalButton}
+              onPress={() => {
+                setShowAndroidOptions(false);
+                if (!androidOptionsDevice.online) {
+                  Alert.alert(
+                    "Device offline",
+                    "Update settings can only be accessed while the device is online."
+                  );
+                  return;
+                }
+                router.push({
+                  pathname: "/(device-setup)/updates",
+                  params: {
+                    host: androidOptionsDevice.host,
+                    name: androidOptionsDevice.name,
+                  },
+                });
+              }}
+            >
+              <Text style={{ fontWeight: "600" }}>Update Settings</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.modalButton}
+              onPress={async () => {
+                setShowAndroidOptions(false);
+                if (!androidOptionsDevice.online) {
+                  Alert.alert(
+                    "Device offline",
+                    "Beep settings can only be changed while the device is online."
+                  );
+                  return;
+                }
+                setBeepHost(androidOptionsDevice.host);
+                setShowBeepModal(true);
+                setBeepDirty(false);
+                await loadBeepPrefs(androidOptionsDevice.host);
+              }}
+            >
+              <Text style={{ fontWeight: "600" }}>Beep Settings</Text>
+            </TouchableOpacity>
+
+            {androidOptionsDevice.mode !== "local" && (
+              <TouchableOpacity
+                style={styles.modalButton}
+                onPress={() => {
+                  setShowAndroidOptions(false);
+                  if (!androidOptionsDevice.online) {
+                    Alert.alert(
+                      "Device offline",
+                      "Wi‑Fi settings can only be changed while the device is online."
+                    );
+                    return;
+                  }
+                  Alert.alert(
+                    "Edit Wi‑Fi",
+                    "Wi‑Fi changes are supported on this device."
+                  );
+                }}
+              >
+                <Text style={{ fontWeight: "600" }}>Edit Wi‑Fi</Text>
+              </TouchableOpacity>
+            )}
+
+            <TouchableOpacity
+              style={styles.modalButton}
+              onPress={() => {
+                setShowAndroidOptions(false);
+                Alert.alert(
+                  "Device Details",
+                  `Name: ${androidOptionsDevice.name}
+ID: ${androidOptionsDevice.id}
+Hostname: ${androidOptionsDevice.host}.local
+Status: ${androidOptionsDevice.online ? "Online" : "Offline"}
+Firmware: ${androidOptionsDevice.firmware || "Unknown"}`
+                );
+              }}
+            >
+              <Text style={{ fontWeight: "600" }}>Device Details</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => setShowAndroidOptions(false)}
+              style={{ marginTop: 12 }}
+            >
+              <Text style={{ textAlign: "center", color: colors.textSecondary }}>
+                Cancel
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
       {addingLocalDevice && (
         <View style={styles.modalOverlay}>
           <View style={[styles.modal, { backgroundColor: colors.background }]}>
@@ -980,6 +1109,59 @@ Firmware: ${device.firmware || "Unknown"}`,
                 style={{ color: colors.textSecondary, textAlign: "center" }}
               >
                 Close
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+      {showRenameModal && renameDevice && (
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modal, { backgroundColor: colors.background }]}>
+            <Text style={[styles.modalTitle, { color: colors.text }]}>
+              Rename device
+            </Text>
+
+            <TextInput
+              value={renameValue}
+              onChangeText={setRenameValue}
+              style={[
+                styles.input,
+                { color: colors.text, borderColor: colors.tint },
+              ]}
+              placeholder="Device name"
+            />
+
+            <TouchableOpacity
+              style={[styles.modalButton, { backgroundColor: colors.tint }]}
+              onPress={async () => {
+                if (!renameValue.trim()) return;
+
+                const updated = devices.map((d) =>
+                  d.id === renameDevice.id ? { ...d, name: renameValue.trim() } : d
+                );
+
+                setDevices(updated);
+                await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+
+                setShowRenameModal(false);
+                setRenameDevice(null);
+                setRenameValue("");
+              }}
+            >
+              <Text style={{ color: colors.background, fontWeight: "600" }}>
+                Save
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              onPress={() => {
+                setShowRenameModal(false);
+                setRenameDevice(null);
+              }}
+              style={{ marginTop: 12 }}
+            >
+              <Text style={{ color: colors.textSecondary, textAlign: "center" }}>
+                Cancel
               </Text>
             </TouchableOpacity>
           </View>
