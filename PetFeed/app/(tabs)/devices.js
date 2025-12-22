@@ -12,6 +12,7 @@ import {
   ActivityIndicator,
   Platform,
   TextInput,
+  PermissionsAndroid,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useColorScheme } from "react-native";
@@ -60,6 +61,25 @@ async function pingHost(host) {
       e?.message || e
     );
     return { online: false, firmware: "unavailable" };
+  }
+}
+
+// Helper to request BLE permissions on Android
+async function requestAndroidBlePermissions() {
+  if (Platform.OS !== "android") return;
+
+  console.log("[Android][BLE] Requesting BLE permissions");
+
+  try {
+    const result = await PermissionsAndroid.requestMultiple([
+      PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+      PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+      PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+    ]);
+
+    console.log("[Android][BLE] Permission results:", result);
+  } catch (e) {
+    console.error("[Android][BLE] Permission request failed", e);
   }
 }
 
@@ -214,9 +234,12 @@ export default function DevicesScreen() {
   }, [loadDevices]);
 
   useEffect(() => {
-    try {
-      initBle();
-    } catch {}
+    (async () => {
+      await requestAndroidBlePermissions();
+      try {
+        initBle();
+      } catch {}
+    })();
   }, []);
 
   // 🔁 Re-sync active device when returning to this screen (NO update check)

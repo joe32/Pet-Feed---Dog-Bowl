@@ -80,6 +80,11 @@ export default function AddDeviceScreen() {
   // }, []);
   // (REMOVED: auto-start Wi-Fi scan when modal appears)
 
+  // TEMP: force connection mode popup on load (REMOVE AFTER TESTING)
+  // useEffect(() => {
+  //   setSetupStep("mode");
+  // }, []);
+
   async function scanWifiNetworks() {
     // Bump sequence so older scans are ignored
     const seq = ++wifiScanSeqRef.current;
@@ -461,17 +466,15 @@ export default function AddDeviceScreen() {
                 style={[
                   styles.modalButton,
                   {
-                    backgroundColor:
-                      connectionMode === "wifi" ? colors.tint : "#999",
+                    backgroundColor: connectionMode ? colors.tint : "#999",
                     marginTop: 12,
                   },
                 ]}
-                disabled={connectionMode !== "wifi"}
+                disabled={!connectionMode}
                 onPress={() => {
-                  if (connectionMode === "wifi") {
-                    setSetupStep("wifi");
-                    scanWifiNetworks();
-                  }
+                  // Both Wi‑Fi and Cloud go through the SAME Wi‑Fi setup flow
+                  setSetupStep("wifi");
+                  scanWifiNetworks();
                 }}
               >
                 <Text style={{ color: colors.background, fontWeight: "600" }}>
