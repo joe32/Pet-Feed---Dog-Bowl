@@ -29,7 +29,7 @@
 #include <SPIFFS.h>
 #include <Update.h>
 
-#define FW_VERSION "1.4.5"
+#define FW_VERSION "1.4.6"
 #define FIRMWARE_DIR "/fw"
 
 String latestBinName = "";
@@ -58,10 +58,10 @@ bool checkUpdateRunning = false;
 TaskHandle_t checkUpdateTaskHandle = nullptr;
 
 // ===== AUTO UPDATE PREFS =====
-// Defaults: auto updates ON, preferred time 00:01 (12:01am)
+// Defaults: auto updates ON, preferred time 00:00 (12:00am)
 bool autoUpdateEnabled = true;
 int preferredUpdateHour = 0;
-int preferredUpdateMinute = 1;
+int preferredUpdateMinute = 0;
 
 // automatic update timing (TESTING = 5 minutes)
 unsigned long lastAutoUpdateCheckMs = 0;
