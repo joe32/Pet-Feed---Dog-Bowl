@@ -13,6 +13,7 @@ import {
   Platform,
   TextInput,
   PermissionsAndroid,
+  Linking,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useColorScheme } from "react-native";
@@ -225,7 +226,6 @@ export default function DevicesScreen() {
   //       },
   //     },
   //   ]);
-
   //   setActiveDeviceId("FAKE-DEVICE-001");
   // }, []);
 
@@ -807,9 +807,43 @@ Firmware: ${device.firmware || "Unknown"}`,
         >
           {devices.length === 0 ? (
             <View style={styles.empty}>
-              <Text style={[styles.title, { color: colors.text }]}>
-                No devices
+              <Text style={[styles.title, { color: colors.text, marginBottom: 12 }]}>
+                No devices added yet
               </Text>
+
+              <Text
+                style={{
+                  color: colors.textSecondary,
+                  fontSize: 16,
+                  textAlign: "center",
+                  maxWidth: 280,
+                  marginBottom: 20,
+                }}
+              >
+                To get started, tap the “Add Device +” button in the top‑right corner and follow the setup steps.
+              </Text>
+
+              <TouchableOpacity
+                onPress={async () => {
+                  const url = "https://youtu.be/u6PJ9xKzgak";
+                  const supported = await Linking.canOpenURL(url);
+                  if (supported) {
+                    await Linking.openURL(url);
+                  }
+                }}
+              >
+                <Text
+                  style={{
+                    color: colors.tint,
+                    fontSize: 15,
+                    fontWeight: "600",
+                    textDecorationLine: "underline",
+                    textAlign: "center",
+                  }}
+                >
+                  Tap here to watch the setup tutorial
+                </Text>
+              </TouchableOpacity>
             </View>
           ) : (
             <>{devices.map(renderDevice)}</>

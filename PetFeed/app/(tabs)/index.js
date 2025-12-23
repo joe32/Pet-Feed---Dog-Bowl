@@ -5,13 +5,47 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useFocusEffect } from "expo-router";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { useRouter } from "expo-router";
 
 const STORAGE_KEY = "PETFEED_DEVICES";
 const ACTIVE_DEVICE_KEY = "PETFEED_ACTIVE_DEVICE";
+const HAS_USED_APP_KEY = "PETFEED_HAS_USED_APP";
 
 export default function HomeScreen() {
   const scheme = useColorScheme() ?? "light";
   const colors = Colors[scheme];
+  const router = useRouter();
+
+useFocusEffect(
+  useCallback(() => {
+    let cancelled = false;
+
+    async function checkFirstUse() {
+      try {
+        const hasUsed = await AsyncStorage.getItem(HAS_USED_APP_KEY);
+        console.log("[Home] HAS_USED_APP_KEY =", hasUsed);
+
+        if (!hasUsed && !cancelled) {
+          console.log("[Home] First launch detected → redirecting to /devices");
+          await AsyncStorage.setItem(HAS_USED_APP_KEY, "true");
+
+          // Important: use push, not replace, inside tabs
+          router.push("/devices");
+        } else {
+          console.log("[Home] Not first launch, staying on Control");
+        }
+      } catch (e) {
+        console.log("[Home] checkFirstUse error", e);
+      }
+    }
+
+    checkFirstUse();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [router])
+);
 
   const [devices, setDevices] = useState([]);
   const [currentId, setCurrentId] = useState(null);
@@ -132,6 +166,11 @@ export default function HomeScreen() {
 
   const currentDevice = devices.find(d => d.id === currentId);
   const controlsDisabled = !currentDevice || currentDevice.online === false;
+
+  useEffect(() => {
+    console.log("[Home] devices.length =", devices.length);
+    console.log("[Home] currentId =", currentId);
+  }, [devices, currentId]);
 
   async function sendCommand(command) {
     if (!currentDevice || !currentDevice.hostname) return;

@@ -1,10 +1,12 @@
-import { View, Text, TouchableOpacity, StyleSheet, Alert, Linking } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+import { View, Text, TouchableOpacity, StyleSheet, Linking, Alert } from "react-native";
 import { useColorScheme } from "react-native";
 import { Colors } from "../../constants/theme";
 import { SafeAreaView } from "react-native-safe-area-context";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import Constants from "expo-constants";
+import { Ionicons } from "@expo/vector-icons";
+
+const HAS_USED_APP_KEY = "PETFEED_HAS_USED_APP";
 
 export default function SettingsScreen() {
   const scheme = useColorScheme() ?? "light";
@@ -72,7 +74,12 @@ export default function SettingsScreen() {
           style: "destructive",
           onPress: async () => {
             await factoryResetAllDevices();
+
+            // Completely wipe all persisted app data
             await AsyncStorage.clear();
+
+            // Explicitly ensure first-use flag is removed
+            await AsyncStorage.removeItem(HAS_USED_APP_KEY);
           },
         },
       ]
@@ -101,6 +108,16 @@ export default function SettingsScreen() {
         >
           <Text style={[styles.rowText, { color: colors.text }]}>
             Feature requests / Bug reports
+          </Text>
+          <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.row}
+          onPress={() => Linking.openURL("https://youtu.be/u6PJ9xKzgak")}
+        >
+          <Text style={[styles.rowText, { color: colors.text }]}>
+            Watch setup tutorial
           </Text>
           <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
         </TouchableOpacity>
