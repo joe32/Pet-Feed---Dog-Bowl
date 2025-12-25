@@ -29,7 +29,7 @@
 #include <SPIFFS.h>
 #include <Update.h>
 
-#define FW_VERSION "1.4.6"
+#define FW_VERSION "1.5.1"
 #define FIRMWARE_DIR "/fw"
 
 String latestBinName = "";
@@ -293,6 +293,7 @@ bool installFirmwareFromSPIFFS(int targetIndex) {
   otaMessage = "Install complete, rebooting";
   Serial.println("✅ Firmware installed successfully");
   Serial.println("🔁 Rebooting...");
+  prepareForReboot("installFirmwareFromSPIFFS");
   delay(500);
   ESP.restart();
   return true;
@@ -827,6 +828,7 @@ void confirmBeep() {
   beep(1600, 160);
 }
 
+
 void scheduledFeedBeep() {
   if (!beepOnScheduledFeed) {
     Serial.println("🔕 Scheduled feeding beep disabled");
@@ -840,6 +842,28 @@ void scheduledFeedBeep() {
     toneOff();
     delay(250);
   }
+}
+
+// ================= BUZZER: HARD SILENCE BEFORE REBOOT =================
+void prepareForReboot(const char *reason) {
+  Serial.print("🔇 BUZZER OFF before reboot: ");
+  Serial.println(reason);
+
+  // Stop any tone immediately
+  toneOff();
+
+  // Detach PWM from the buzzer pin (prevents brief PWM glitches during restart)
+  ledcDetachPin(buzzerPin);
+
+  // Hard-force the GPIO low so the buzzer cannot chirp while the ESP resets
+  pinMode(buzzerPin, OUTPUT);
+  digitalWrite(buzzerPin, LOW);
+
+  // Ensure channel duty is zero as well (belt-and-braces)
+  ledcWrite(buzzerChannel, 0);
+
+  delay(20);
+  Serial.flush();
 }
 
 // ================= HELPER: NOTIFY LID STATE =================
@@ -1118,6 +1142,7 @@ void startWifiMode() {
       Serial.println("⚠️ Wi‑Fi failed, but device was previously connected — staying configured");
     }
 
+    prepareForReboot("startWifiMode wifi failed");
     ESP.restart();
     return;
   }
@@ -1211,6 +1236,7 @@ void startWifiMode() {
     server.send(200, "text/plain", "resetting");
     delay(200);
     factoryReset();
+    prepareForReboot("HTTP /factory-reset");
     ESP.restart();
   });
 
@@ -1561,6 +1587,7 @@ void startWifiMode() {
     server.send(200, "application/json", "{\"status\":\"saved\",\"reboot\":true}");
 
     Serial.println("🔁 Rebooting to apply new Wi‑Fi...");
+    prepareForReboot("HTTP /update-wifi");
     Serial.flush();
     delay(800);
     ESP.restart();
@@ -1841,6 +1868,7 @@ class CharacteristicCallbacks : public BLECharacteristicCallbacks {
     } else {
       Serial.println("🔁 Rebooting into Wi‑Fi mode...");
     }
+    prepareForReboot("BLE provisioning");
     Serial.flush();
     delay(1500);
     ESP.restart();
@@ -1856,6 +1884,10 @@ void setup() {
 
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LOW);
+
+  // Hard-force buzzer pin LOW immediately (prevents reboot chirp before LEDC is configured)
+  pinMode(buzzerPin, OUTPUT);
+  digitalWrite(buzzerPin, LOW);
 
   ledcSetup(buzzerChannel, 2000, buzzerResolution);
   ledcAttachPin(buzzerPin, buzzerChannel);
@@ -1990,6 +2022,7 @@ void loop() {
       toneOff();
       delay(200);
       factoryReset();
+      prepareForReboot("reset button factory reset");
       ESP.restart();
     }
 
@@ -2084,6 +2117,7 @@ void loop() {
       moveLidClosed();
     if (cmd == "factory") {
       factoryReset();
+      prepareForReboot("serial factory");
       ESP.restart();
     }
     if (cmd == "network") {
