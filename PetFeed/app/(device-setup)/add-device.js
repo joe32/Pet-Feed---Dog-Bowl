@@ -10,6 +10,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Pressable,
 } from "react-native";
 import { useColorScheme } from "react-native";
 import { useState, useRef, useEffect } from "react";
@@ -39,6 +40,7 @@ export default function AddDeviceScreen() {
   const scheme = useColorScheme() ?? "light";
   const colors = Colors[scheme];
   const router = useRouter();
+
 
   const [scanning, setScanning] = useState(false);
   const [devices, setDevices] = useState([]);
@@ -263,6 +265,31 @@ export default function AddDeviceScreen() {
     <SafeAreaView
       style={[styles.container, { backgroundColor: colors.background }]}
     >
+      <Pressable
+        onPress={() => router.push("manual-setup")}
+        style={{
+          position: "absolute",
+          top: 12,
+          right: 16,
+          paddingVertical: 6,
+          paddingHorizontal: 12,
+          borderRadius: 14,
+          borderWidth: 1,
+          borderColor: colors.textSecondary + "55",
+          backgroundColor: scheme === "dark" ? "#0b1220" : "#ffffffcc",
+          zIndex: 10,
+        }}
+      >
+        <Text
+          style={{
+            fontSize: 13,
+            color: colors.textSecondary,
+            fontWeight: "600",
+          }}
+        >
+          Add existing device
+        </Text>
+      </Pressable>
       <View style={styles.content}>
         <Text style={[styles.title, { color: colors.text }]}>
           Find nearby feeder
