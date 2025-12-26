@@ -1,3 +1,13 @@
+import { Text, TextInput } from "react-native";
+
+if (Text.defaultProps == null) {
+  Text.defaultProps = {};
+}
+Text.defaultProps.allowFontScaling = false;
+
+TextInput.defaultProps = TextInput.defaultProps || {};
+TextInput.defaultProps.allowFontScaling = false;
+
 import {
   DarkTheme,
   DefaultTheme,
@@ -21,7 +31,12 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemeProvider value={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
-        <Stack>
+        <Stack
+          screenOptions={{
+            headerTitleAllowFontScaling: false,
+            headerBackTitleAllowFontScaling: false,
+          }}
+        >
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
           <Stack.Screen
             name="(device-setup)"

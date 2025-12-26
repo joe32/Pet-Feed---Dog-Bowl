@@ -404,7 +404,9 @@ export default function HomeScreen() {
                 style={[
                   styles.scheduledInlineText,
                   scheme === "light" && styles.scheduledInlineTextLight,
+                  { flexShrink: 1, flexWrap: "wrap", textAlign: "right" },
                 ]}
+                numberOfLines={2}
               >
                 Currently scheduled for{" "}
                 <Text style={styles.scheduledInlineTime}>
