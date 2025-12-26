@@ -386,6 +386,77 @@ export default function DevicesScreen() {
     await AsyncStorage.setItem(ACTIVE_DEVICE_KEY, device.id);
   }
 
+  function confirmRemoveDevice(device) {
+    const isManual =
+      typeof device?.id === "string" && device.id.startsWith("manual_");
+
+    const isOffline = device.online === false;
+
+    // Manual (hostname-added) devices: app-only removal
+    if (isManual) {
+      Alert.alert(
+        "Remove device?",
+        "This will remove the device from this app only. It will NOT factory reset the feeder.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Remove from app",
+            style: "destructive",
+            onPress: () => removeDeviceFromApp(device),
+          },
+        ]
+      );
+      return;
+    }
+
+    // Offline devices: never allow factory reset
+    if (isOffline) {
+      Alert.alert(
+        "Device offline",
+        "This device is currently offline, so it cannot be factory reset.\n\nYou can remove it from this app only.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Remove from app",
+            style: "destructive",
+            onPress: () => removeDeviceFromApp(device),
+          },
+        ]
+      );
+      return;
+    }
+
+    // Online, non-manual devices: offer both options
+    Alert.alert(
+      "Remove device",
+      "Choose how you want to remove this device.",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Remove from app only",
+          style: "default",
+          onPress: () => removeDeviceFromApp(device),
+        },
+        {
+          text: "Delete & factory reset",
+          style: "destructive",
+          onPress: () => removeDevice(device),
+        },
+      ]
+    );
+  }
+
+  async function removeDeviceFromApp(device) {
+    const updated = devices.filter((d) => d.id !== device.id);
+    setDevices(updated);
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+
+    if (activeDeviceId === device.id) {
+      setActiveDeviceId(null);
+      await AsyncStorage.removeItem(ACTIVE_DEVICE_KEY);
+    }
+  }
+
   async function removeDevice(device) {
     // Prevent factory reset for local devices
     if (device.mode === "local") {
@@ -589,7 +660,7 @@ Firmware: ${device.firmware || "Unknown"}`,
         renderLeftActions={() => (
           <TouchableOpacity
             style={[styles.leftAction, { backgroundColor: "#ff3b30" }]}
-            onPress={() => removeDevice(device)}
+            onPress={() => confirmRemoveDevice(device)}
           >
             <Text style={{ color: "#fff", fontWeight: "600" }}>Delete</Text>
           </TouchableOpacity>
@@ -664,7 +735,7 @@ Firmware: ${device.firmware || "Unknown"}`,
                   />
                 </TouchableOpacity>
                 <TouchableOpacity
-                  onPress={() => removeDevice(device)}
+                  onPress={() => confirmRemoveDevice(device)}
                   style={{ marginLeft: 12 }}
                 >
                   <Ionicons name="trash-outline" size={22} color="#ff3b30" />

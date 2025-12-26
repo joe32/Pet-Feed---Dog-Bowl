@@ -170,7 +170,13 @@ export default function ManualSetupScreen() {
         <View style={styles.modalBackdrop}>
           <KeyboardAvoidingView
             behavior={Platform.OS === "ios" ? "padding" : undefined}
-            style={styles.modalCenter}
+            style={[
+              styles.modalCenter,
+              {
+                justifyContent: "flex-start",
+                marginTop: "12%",
+              },
+            ]}
           >
             <View
               style={[
@@ -266,7 +272,13 @@ export default function ManualSetupScreen() {
         <View style={styles.modalBackdrop}>
           <KeyboardAvoidingView
             behavior={Platform.OS === "ios" ? "padding" : undefined}
-            style={styles.modalCenter}
+            style={[
+              styles.modalCenter,
+              {
+                justifyContent: "flex-start",
+                marginTop: "12%",
+              },
+            ]}
           >
             <View
               style={[
@@ -359,8 +371,9 @@ const styles = StyleSheet.create({
   modalBackdrop: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.9)",
-    justifyContent: "center",
-    padding: 18,
+    justifyContent: "flex-start",
+    paddingTop: "50%",
+    paddingHorizontal: 18,
   },
   modalCenter: { width: "100%" },
   modalCard: {
