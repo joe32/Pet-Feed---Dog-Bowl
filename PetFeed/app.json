@@ -2,7 +2,7 @@
   "expo": {
     "name": "PetFeed",
     "slug": "PetFeed",
-    "version": "1.6.5",
+    "version": "1.6.6",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "petfeed",
@@ -17,11 +17,9 @@
       "bundleIdentifier": "com.joewilson.PetFeed",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSLocalNetworkUsageDescription": "This app needs access to your local network to find and control PetFeed devices on your Wi-Fi.",
-        "NSBonjourServices": [
-          "_http._tcp"
-        ],
-        "NSUserNotificationUsageDescription": "PetFeed uses notifications to remind you when a feed is scheduled."
+        "NSUserNotificationUsageDescription": "PetFeed uses notifications to remind you when a scheduled feed happens.",
+        "NSBluetoothAlwaysUsageDescription": "This app uses Bluetooth only during setup to discover your Pet Feeder and transfer Wi-Fi connection details. Bluetooth is not used for ongoing control, tracking, or collecting personal data.",
+        "NSBluetoothPeripheralUsageDescription": "Bluetooth is required to find your Pet Feeder during initial setup so it can be connected to your home Wi-Fi network. After setup, the app communicates with the feeder over the local network, not Bluetooth."
       }
     },
     "android": {
