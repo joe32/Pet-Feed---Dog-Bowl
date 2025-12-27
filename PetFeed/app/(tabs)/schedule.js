@@ -27,7 +27,7 @@ const NOTIFICATION_ID_KEY = "PETFEED_SCHEDULE_NOTIFICATION_ID";
 export default function HomeScreen() {
   const scheme = useColorScheme() ?? "light";
   const colors = Colors[scheme];
-  // PREVIEW ONLY – remove later
+  // PREVIEW ONLY – removed
   const PREVIEW_STATUS = false;
 
   const [devices, setDevices] = useState([]);
@@ -37,6 +37,8 @@ export default function HomeScreen() {
   const [lidState, setLidState] = useState(null);
   const [hasScheduledFeed, setHasScheduledFeed] = useState(false);
   const [scheduledLabel, setScheduledLabel] = useState(null);
+
+  // TEMP preview – removed
 
   const [showPicker, setShowPicker] = useState(false);
   const [scheduledTime, setScheduledTime] = useState(new Date());
@@ -199,9 +201,18 @@ export default function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      loadDevices();
-      fetchScheduleState();
-      fetchLidState();
+      (async () => {
+        await loadDevices();
+
+        // 🔁 Always resync selected device from storage
+        const activeId = await AsyncStorage.getItem(ACTIVE_DEVICE_KEY);
+        if (activeId) {
+          setCurrentId(activeId);
+        }
+
+        fetchScheduleState(true);
+        fetchLidState(true);
+      })();
     }, [loadDevices])
   );
 
@@ -359,16 +370,18 @@ export default function HomeScreen() {
           justifyContent: "flex-start",
           alignItems: "center",
           marginTop: 20,
+          paddingBottom: 160,
         }}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
       >
-        {(currentDevice || PREVIEW_STATUS) && (
+        {currentDevice && (
           <View
             style={[
               styles.combinedStatusPill,
               scheme === "light" && styles.combinedStatusPillLight,
+              { flexDirection: "column", alignItems: "center" },
             ]}
           >
             <View style={styles.lidStatusInline}>
@@ -398,27 +411,35 @@ export default function HomeScreen() {
                   : "Unknown"}
               </Text>
             </View>
-
-            {(scheduledLabel || PREVIEW_STATUS) && (
-              <Text
-                style={[
-                  styles.scheduledInlineText,
-                  scheme === "light" && styles.scheduledInlineTextLight,
-                  { flexShrink: 1, flexWrap: "wrap", textAlign: "right" },
-                ]}
-                numberOfLines={2}
-              >
-                Currently scheduled for{" "}
-                <Text style={styles.scheduledInlineTime}>
-                  {PREVIEW_STATUS ? "23:27" : scheduledLabel}
+            {scheduledLabel && (
+              <View style={{ marginTop: 6, alignItems: "center" }}>
+                <Text
+                  style={[
+                    styles.scheduledInlineText,
+                    scheme === "light" && styles.scheduledInlineTextLight,
+                    { flexShrink: 1, flexWrap: "wrap", textAlign: "right" },
+                  ]}
+                  numberOfLines={2}
+                >
+                  Currently scheduled for{" "}
+                  <Text style={styles.scheduledInlineTime}>
+                    {scheduledLabel}
+                  </Text>
                 </Text>
-              </Text>
+              </View>
             )}
           </View>
         )}
 
-        {(currentDevice || PREVIEW_STATUS) && (
-          <View style={{ flexDirection: "row", gap: 10, marginBottom: 8 }}>
+        {currentDevice && (
+          <View
+            style={{
+              flexDirection: "row",
+              gap: 10,
+              marginTop: 12,
+              marginBottom: 12,
+            }}
+          >
             <TouchableOpacity
               disabled={!currentDevice || !currentDevice.online}
               onPress={() => sendCommand("OPEN")}
@@ -542,7 +563,7 @@ export default function HomeScreen() {
       <View
         style={{
           position: "absolute",
-          bottom: 90,
+          bottom: Platform.OS === "android" ? 5 : 90,
           left: 0,
           right: 0,
           alignItems: "center",

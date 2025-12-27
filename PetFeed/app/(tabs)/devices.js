@@ -65,6 +65,25 @@ async function pingHost(host) {
   }
 }
 
+// Merge status updates (online/firmware) into the latest stored devices,
+// preserving new/manual devices and all other fields.
+function mergeStatusIntoDevices(latestDevices, statusUpdates) {
+  // statusUpdates: array of { id, host, online, firmware }
+  const byId = new Map(statusUpdates.map((u) => [u.id, u]));
+  const byHost = new Map(statusUpdates.map((u) => [u.host, u]));
+
+  return (latestDevices || []).map((d) => {
+    const u = (d.id && byId.get(d.id)) || (d.host && byHost.get(d.host));
+    if (!u) return d;
+
+    return {
+      ...d,
+      online: typeof u.online === "boolean" ? u.online : d.online,
+      firmware: u.firmware ?? d.firmware,
+    };
+  });
+}
+
 // Helper to request BLE permissions on Android
 async function requestAndroidBlePermissions() {
   if (Platform.OS !== "android") return;
@@ -306,22 +325,22 @@ export default function DevicesScreen() {
         "[Devices] Initial screen load: fetching /ping + /version for all devices"
       );
 
-      const updated = await Promise.all(
-        devices.map(async (d) => {
-          if (!d.host) return d;
+      // Always base persistence on the latest stored list to avoid overwriting newly added devices
+      const raw = await AsyncStorage.getItem(STORAGE_KEY);
+      const latest = raw ? JSON.parse(raw) : [];
 
+      const statusUpdates = await Promise.all(
+        (latest || []).map(async (d) => {
+          if (!d.host) return { id: d.id, host: d.host, online: d.online, firmware: d.firmware };
           const result = await pingHost(d.host);
-
-          return {
-            ...d,
-            online: result.online,
-            firmware: result.firmware ?? "unavailable",
-          };
+          return { id: d.id, host: d.host, online: result.online, firmware: result.firmware ?? "unavailable" };
         })
       );
 
-      setDevices(updated);
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      const merged = mergeStatusIntoDevices(latest, statusUpdates);
+
+      setDevices(merged);
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
     })();
     // run ONLY once on screen mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -334,22 +353,21 @@ export default function DevicesScreen() {
     const interval = setInterval(async () => {
       console.log("[Devices] 5s poll: fetching /version for all devices");
 
-      const updated = await Promise.all(
-        devices.map(async (d) => {
-          if (!d.host) return d;
+      const raw = await AsyncStorage.getItem(STORAGE_KEY);
+      const latest = raw ? JSON.parse(raw) : [];
 
+      const statusUpdates = await Promise.all(
+        (latest || []).map(async (d) => {
+          if (!d.host) return { id: d.id, host: d.host, online: d.online, firmware: d.firmware };
           const result = await pingHost(d.host);
-
-          return {
-            ...d,
-            online: result.online,
-            firmware: result.firmware ?? "unavailable",
-          };
+          return { id: d.id, host: d.host, online: result.online, firmware: result.firmware ?? "unavailable" };
         })
       );
 
-      setDevices(updated);
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+      const merged = mergeStatusIntoDevices(latest, statusUpdates);
+
+      setDevices(merged);
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
     }, 5000);
 
     return () => clearInterval(interval);
@@ -362,22 +380,21 @@ export default function DevicesScreen() {
       "[Devices] Pull-to-refresh: fetching /ping + /version for all devices"
     );
 
-    const updated = await Promise.all(
-      devices.map(async (d) => {
-        if (!d.host) return d;
+    const raw = await AsyncStorage.getItem(STORAGE_KEY);
+    const latest = raw ? JSON.parse(raw) : [];
 
+    const statusUpdates = await Promise.all(
+      (latest || []).map(async (d) => {
+        if (!d.host) return { id: d.id, host: d.host, online: d.online, firmware: d.firmware };
         const result = await pingHost(d.host);
-
-        return {
-          ...d,
-          online: result.online,
-          firmware: result.firmware ?? "unavailable",
-        };
+        return { id: d.id, host: d.host, online: result.online, firmware: result.firmware ?? "unavailable" };
       })
     );
 
-    setDevices(updated);
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    const merged = mergeStatusIntoDevices(latest, statusUpdates);
+
+    setDevices(merged);
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(merged));
     setRefreshing(false);
   }, [devices]);
 
@@ -967,7 +984,7 @@ Firmware: ${device.firmware || "Unknown"}`,
         <View
           style={{
             position: "absolute",
-            bottom: 90,
+            bottom: Platform.OS === "android" ? 5 : 90,
             left: 0,
             right: 0,
             alignItems: "center",

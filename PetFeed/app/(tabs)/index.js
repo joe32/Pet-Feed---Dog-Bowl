@@ -1,4 +1,4 @@
-import { View, Text, TouchableOpacity, StyleSheet, Modal, Pressable, ScrollView, RefreshControl, Linking } from "react-native";
+import { View, Text, TouchableOpacity, StyleSheet, Modal, Pressable, ScrollView, RefreshControl, Linking, Platform } from "react-native";
 import { useColorScheme } from "react-native";
 import { Colors } from "../../constants/theme";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -406,7 +406,7 @@ useFocusEffect(
       <View
         style={{
           position: "absolute",
-          bottom: 90,
+          bottom: Platform.OS === "android" ? 5 : 90,
           left: 0,
           right: 0,
           alignItems: "center",

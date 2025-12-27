@@ -124,8 +124,10 @@ export default function AddDeviceScreen() {
       try {
         if (wifiAbortRef.current) wifiAbortRef.current.abort();
       } catch {}
-      setLoadingWifi(false);
-      setWifiTimedOut(true);
+      safeSet(() => {
+        setLoadingWifi(false);
+        setWifiTimedOut(true);
+      });
     }, 10000);
   }
 
@@ -138,10 +140,15 @@ export default function AddDeviceScreen() {
   const wifiAbortRef = useRef(null);
   const wifiActiveSeqRef = useRef(0);
 
-  // Android-only: prevent setState after unmount (can crash on some devices)
+  // Android-only: prevent setState after unmount / during navigation (can crash on some devices)
   const isMountedRef = useRef(true);
+  const androidNavigatingRef = useRef(false);
   const safeSet = (fn) => {
-    if (Platform.OS === "android" && !isMountedRef.current) return;
+    if (
+      Platform.OS === "android" &&
+      (!isMountedRef.current || androidNavigatingRef.current)
+    )
+      return;
     fn();
   };
 
@@ -191,9 +198,11 @@ export default function AddDeviceScreen() {
           .map((s) => s.trim())
           .filter(Boolean);
 
-        setWifiNetworks(networks);
-        setLoadingWifi(false);
-        setWifiTimedOut(false);
+        safeSet(() => {
+          setWifiNetworks(networks);
+          setLoadingWifi(false);
+          setWifiTimedOut(false);
+        });
       }
     });
 
@@ -221,9 +230,11 @@ export default function AddDeviceScreen() {
 
     startScan(
       (device) => {
-        setDevices((prev) => {
-          if (prev.find((d) => d.id === device.id)) return prev;
-          return [...prev, device];
+        safeSet(() => {
+          setDevices((prev) => {
+            if (prev.find((d) => d.id === device.id)) return prev;
+            return [...prev, device];
+          });
         });
       },
       (error) => {
@@ -237,6 +248,32 @@ export default function AddDeviceScreen() {
       setScanning(false);
       setTimedOut(true);
     }, 5000);
+  }
+  function androidCleanupBeforeNavigate() {
+    if (Platform.OS !== "android") return;
+
+    androidNavigatingRef.current = true;
+
+    try {
+      stopScan();
+    } catch {}
+
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+      timeoutRef.current = null;
+    }
+
+    if (wifiUiTimeoutRef.current) {
+      clearTimeout(wifiUiTimeoutRef.current);
+      wifiUiTimeoutRef.current = null;
+    }
+
+    try {
+      if (wifiAbortRef.current) {
+        wifiAbortRef.current.abort();
+        wifiAbortRef.current = null;
+      }
+    } catch {}
   }
 
   async function saveDeviceAndReturn(device, name, mode, ssidParam) {
@@ -258,6 +295,13 @@ export default function AddDeviceScreen() {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
     await AsyncStorage.setItem(LAST_CONNECTED_KEY, device.id);
 
+    androidCleanupBeforeNavigate();
+
+    if (Platform.OS === "android") {
+      requestAnimationFrame(() => router.replace("/devices"));
+      return;
+    }
+
     router.replace("/devices");
   }
 
@@ -265,31 +309,33 @@ export default function AddDeviceScreen() {
     <SafeAreaView
       style={[styles.container, { backgroundColor: colors.background }]}
     >
-      <Pressable
-        onPress={() => router.push("manual-setup")}
-        style={{
-          position: "absolute",
-          top: 12,
-          right: 16,
-          paddingVertical: 6,
-          paddingHorizontal: 12,
-          borderRadius: 14,
-          borderWidth: 1,
-          borderColor: colors.textSecondary + "55",
-          backgroundColor: scheme === "dark" ? "#0b1220" : "#ffffffcc",
-          zIndex: 10,
-        }}
-      >
-        <Text
+      {setupStep === null && (
+        <Pressable
+          onPress={() => router.push("manual-setup")}
           style={{
-            fontSize: 13,
-            color: colors.textSecondary,
-            fontWeight: "600",
+            position: "absolute",
+            top: 12,
+            right: 16,
+            paddingVertical: 6,
+            paddingHorizontal: 12,
+            borderRadius: 14,
+            borderWidth: 1,
+            borderColor: colors.textSecondary + "55",
+            backgroundColor: scheme === "dark" ? "#0b1220" : "#ffffffcc",
+            zIndex: 10,
           }}
         >
-          Add existing device
-        </Text>
-      </Pressable>
+          <Text
+            style={{
+              fontSize: 13,
+              color: colors.textSecondary,
+              fontWeight: "600",
+            }}
+          >
+            Add existing device
+          </Text>
+        </Pressable>
+      )}
       <View style={styles.content}>
         <Text style={[styles.title, { color: colors.text }]}>
           Find nearby feeder
@@ -647,7 +693,7 @@ export default function AddDeviceScreen() {
                             borderColor:
                               ssid === net ? colors.tint : "#00000022",
                             marginTop: 0,
-                            marginBottom: 8,
+                            marginBottom: 0,
                           },
                         ]}
                         onPress={() => {
