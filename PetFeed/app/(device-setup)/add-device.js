@@ -298,7 +298,9 @@ export default function AddDeviceScreen() {
     androidCleanupBeforeNavigate();
 
     if (Platform.OS === "android") {
-      requestAnimationFrame(() => router.replace("/devices"));
+      setTimeout(() => {
+        router.replace("/devices");
+      }, 0);
       return;
     }
 
