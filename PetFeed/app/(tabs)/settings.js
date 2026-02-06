@@ -124,7 +124,7 @@ export default function SettingsScreen() {
 
         <TouchableOpacity
           style={styles.row}
-          onPress={() => Linking.openURL("https://joescreations.co.uk")}
+          onPress={() => Linking.openURL("https://joescreations.co.uk/product/petfeeder/")}
         >
           <Text style={[styles.rowText, { color: colors.text }]}>
             Purchase a new removable bowl insert
