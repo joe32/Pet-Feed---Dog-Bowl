@@ -29,7 +29,7 @@
 #include <SPIFFS.h>
 #include <Update.h>
 
-#define FW_VERSION "1.5.2"
+#define FW_VERSION "1.5.3"
 #define FIRMWARE_DIR "/fw"
 
 String latestBinName = "";
@@ -480,9 +480,251 @@ String wifiSSID = "";
 String wifiPASS = "";
 String mdnsHost = "";
 String deviceMode = "ble";
+extern String lastWifiScanResult;
+WiFiServer commandServer(23);
+WiFiClient commandClient;
+String netInputBuffer = "";
+
+enum NetPendingAction {
+  NET_PENDING_NONE,
+  NET_PENDING_DOWNLOAD_CONFIRM,
+  NET_PENDING_DELETE_SELECT,
+  NET_PENDING_INSTALL_SELECT
+};
+
+NetPendingAction netPendingAction = NET_PENDING_NONE;
 
 bool isNetworkMode() {
   return deviceMode == "wifi" || deviceMode == "cloud";
+}
+
+bool netClientConnected() {
+  return commandClient && commandClient.connected();
+}
+
+void netPrintHelp() {
+  if (!netClientConnected())
+    return;
+
+  commandClient.println("PetFeed network console commands:");
+  commandClient.println("  version");
+  commandClient.println("  checkupdate");
+  commandClient.println("  download");
+  commandClient.println("  list");
+  commandClient.println("  delete");
+  commandClient.println("  install");
+  commandClient.println("  update");
+  commandClient.println("  open");
+  commandClient.println("  close");
+  commandClient.println("  factory");
+  commandClient.println("  network");
+  commandClient.println("  help");
+}
+
+void listDownloadedFirmwareToNet() {
+  if (!netClientConnected())
+    return;
+
+  if (!ensureSPIFFS()) {
+    commandClient.println("SPIFFS not mounted");
+    return;
+  }
+
+  std::vector<String> files;
+  int count = collectFirmwareFiles(files);
+  if (count == 0) {
+    commandClient.println("No downloaded firmware found");
+    return;
+  }
+
+  commandClient.println("Downloaded firmware:");
+  for (int i = 0; i < files.size(); i++) {
+    File f = SPIFFS.open(files[i]);
+    if (!f)
+      continue;
+
+    String name = files[i];
+    if (name.startsWith(FIRMWARE_DIR "/")) {
+      name.remove(0, strlen(FIRMWARE_DIR) + 1);
+    }
+
+    commandClient.printf("%d. %s (%d bytes)\n", i + 1, name.c_str(), f.size());
+    f.close();
+  }
+}
+
+void handleNetworkConsoleCommand(String cmd) {
+  cmd.trim();
+  cmd.toLowerCase();
+  if (cmd.length() == 0)
+    return;
+
+  if (netPendingAction == NET_PENDING_DOWNLOAD_CONFIRM) {
+    netPendingAction = NET_PENDING_NONE;
+    if (cmd == "y" || cmd == "yes") {
+      if (latestBinName.length() == 0) {
+        commandClient.println("No latest firmware info available");
+      } else {
+        bool ok = downloadFirmware(latestBinName);
+        commandClient.println(ok ? "Download started/completed (see logs)." : "Download failed.");
+      }
+    } else {
+      commandClient.println("Download cancelled");
+    }
+    return;
+  }
+
+  if (netPendingAction == NET_PENDING_DELETE_SELECT) {
+    netPendingAction = NET_PENDING_NONE;
+    int choice = cmd.toInt();
+    if (choice == 0) {
+      bool ok = deleteAllFirmware();
+      commandClient.println(ok ? "Deleted all firmware." : "Delete all failed.");
+    } else if (choice > 0) {
+      bool ok = deleteFirmwareByIndex(choice);
+      commandClient.println(ok ? "Delete completed." : "Delete failed.");
+    } else {
+      commandClient.println("Invalid choice");
+    }
+    return;
+  }
+
+  if (netPendingAction == NET_PENDING_INSTALL_SELECT) {
+    netPendingAction = NET_PENDING_NONE;
+    int choice = cmd.toInt();
+    if (choice > 0) {
+      bool ok = installFirmwareFromSPIFFS(choice);
+      commandClient.println(ok ? "Install started/completed." : "Install failed.");
+    } else {
+      commandClient.println("Invalid choice");
+    }
+    return;
+  }
+
+  if (cmd == "help") {
+    netPrintHelp();
+    return;
+  }
+
+  if (cmd == "version") {
+    commandClient.print("Firmware version: ");
+    commandClient.println(FW_VERSION);
+    return;
+  }
+
+  if (cmd == "checkupdate") {
+    checkLatestRelease();
+    commandClient.print("checkUpdateResult: ");
+    commandClient.println(checkUpdateResult);
+    if (checkUpdateLatest.length()) {
+      commandClient.print("latest: ");
+      commandClient.println(checkUpdateLatest);
+    }
+    return;
+  }
+
+  if (cmd == "download") {
+    checkLatestRelease();
+    if (latestBinName.length() == 0) {
+      commandClient.println("No latest firmware info available");
+      return;
+    }
+    commandClient.print("Download latest firmware ");
+    commandClient.print(latestBinName);
+    commandClient.println("? (y/n)");
+    netPendingAction = NET_PENDING_DOWNLOAD_CONFIRM;
+    return;
+  }
+
+  if (cmd == "list") {
+    listDownloadedFirmware();
+    listDownloadedFirmwareToNet();
+    return;
+  }
+
+  if (cmd == "delete") {
+    listDownloadedFirmware();
+    listDownloadedFirmwareToNet();
+    commandClient.println("0. Delete ALL firmware");
+    commandClient.println("Type number to delete");
+    netPendingAction = NET_PENDING_DELETE_SELECT;
+    return;
+  }
+
+  if (cmd == "install") {
+    listDownloadedFirmware();
+    listDownloadedFirmwareToNet();
+    commandClient.println("Type number to install");
+    netPendingAction = NET_PENDING_INSTALL_SELECT;
+    return;
+  }
+
+  if (cmd == "update") {
+    bool ok = fullAutoUpdate();
+    commandClient.println(ok ? "Update flow finished." : "Update flow failed.");
+    return;
+  }
+
+  if (cmd == "open") {
+    moveLidOpen();
+    commandClient.println("OPEN sent");
+    return;
+  }
+
+  if (cmd == "close") {
+    moveLidClosed();
+    commandClient.println("CLOSE sent");
+    return;
+  }
+
+  if (cmd == "factory") {
+    commandClient.println("Factory reset requested, rebooting...");
+    factoryReset();
+    prepareForReboot("net factory");
+    ESP.restart();
+    return;
+  }
+
+  if (cmd == "network") {
+    commandClient.println("Running Wi-Fi scan...");
+    performWifiScan(true);
+    commandClient.print("Networks: ");
+    commandClient.println(lastWifiScanResult.length() ? lastWifiScanResult : "none");
+    return;
+  }
+
+  commandClient.print("Unknown command: ");
+  commandClient.println(cmd);
+  netPrintHelp();
+}
+
+void handleNetworkConsole() {
+  if (!isNetworkMode())
+    return;
+
+  if (!netClientConnected()) {
+    WiFiClient incoming = commandServer.available();
+    if (incoming) {
+      commandClient = incoming;
+      netInputBuffer = "";
+      netPendingAction = NET_PENDING_NONE;
+      commandClient.println("PetFeed network console ready.");
+      netPrintHelp();
+      Serial.println("🌐 Network console client connected");
+    }
+  }
+
+  while (netClientConnected() && commandClient.available() > 0) {
+    char c = static_cast<char>(commandClient.read());
+    if (c == '\r')
+      continue;
+    if (c == '\n') {
+      handleNetworkConsoleCommand(netInputBuffer);
+      netInputBuffer = "";
+    } else {
+      netInputBuffer += c;
+    }
+  }
 }
 
 WiFiUDP discoveryUdp;
@@ -775,7 +1017,6 @@ int currentAngle = LID_CLOSED;
 const int buzzerPin = 5;
 const int buzzerChannel = 7;
 const int buzzerResolution = 8;
-
 // ===== BUZZER PREFS =====
 // These are persisted (survive reboot/OTA). Defaults are ON.
 bool beepOnManualOpenClose = true;   // open/close button presses
@@ -814,13 +1055,21 @@ unsigned long resetButtonPressStart = 0;
 bool resetTriggered = false;
 
 void toneOn(int freq) {
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
+  ledcWriteTone(buzzerPin, freq);
+  ledcWrite(buzzerPin, 255);
+#else
   ledcWriteTone(buzzerChannel, freq);
-  // Force maximum duty cycle for loudest possible output
   ledcWrite(buzzerChannel, 255);
+#endif
 }
 
 void toneOff() {
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
+  ledcWriteTone(buzzerPin, 0);
+#else
   ledcWriteTone(buzzerChannel, 0);
+#endif
 }
 
 void beep(int freq, int durationMs) {
@@ -864,14 +1113,22 @@ void prepareForReboot(const char *reason) {
   toneOff();
 
   // Detach PWM from the buzzer pin (prevents brief PWM glitches during restart)
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
+  ledcDetach(buzzerPin);
+#else
   ledcDetachPin(buzzerPin);
+#endif
 
   // Hard-force the GPIO low so the buzzer cannot chirp while the ESP resets
   pinMode(buzzerPin, OUTPUT);
   digitalWrite(buzzerPin, LOW);
 
   // Ensure channel duty is zero as well (belt-and-braces)
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
+  ledcWrite(buzzerPin, 0);
+#else
   ledcWrite(buzzerChannel, 0);
+#endif
 
   delay(20);
   Serial.flush();
@@ -1219,6 +1476,8 @@ void startWifiMode() {
 
   ArduinoOTA.begin();
   Serial.println("📡 OTA ready");
+  commandServer.begin();
+  Serial.println("🌐 Network console ready on port 23");
   checkLatestRelease();
 
   server.on("/ping", []() {
@@ -1900,10 +2159,15 @@ void setup() {
   pinMode(buzzerPin, OUTPUT);
   digitalWrite(buzzerPin, LOW);
 
+#if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
+  ledcAttach(buzzerPin, 2000, buzzerResolution);
+  ledcWrite(buzzerPin, 0);
+#else
   ledcSetup(buzzerChannel, 2000, buzzerResolution);
   ledcAttachPin(buzzerPin, buzzerChannel);
   // Ensure buzzer is completely silent on boot/reboot
   ledcWrite(buzzerChannel, 0);
+#endif
   toneOff();
 
   myServo.attach(servoPin);
@@ -2137,6 +2401,8 @@ void loop() {
     }
   }
 
+  handleNetworkConsole();
+
   // ================= OTA BACKGROUND EXECUTION =================
   // (Removed: now handled by FreeRTOS task in response to /update)
 
@@ -2251,15 +2517,6 @@ void loop() {
     }
   }
 
-  // if (deviceMode == "wifi") {
-  //   static unsigned long lastBleLog = 0;
-  //   if (millis() - lastBleLog > 5000) {
-  //     lastBleLog = millis();
-  //     // BLE intentionally disabled in Wi‑Fi mode
-  //   }
-  // }
-
-  // server.handleClient() and ArduinoOTA.handle() now run in FreeRTOS serverTask
 
   if (isNetworkMode() && millis() - lastDiscoveryBroadcast > 6000) {
     lastDiscoveryBroadcast = millis();

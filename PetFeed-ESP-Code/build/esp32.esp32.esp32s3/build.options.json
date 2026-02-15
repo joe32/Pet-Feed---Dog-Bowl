@@ -1,0 +1,10 @@
+{
+  "additionalFiles": "../../..",
+  "builtInLibrariesFolders": "/Users/joewilson/Library/Arduino15/libraries",
+  "compiler.optimization_flags": "-Os",
+  "customBuildProperties": "build.warn_data_percentage=75",
+  "fqbn": "esp32:esp32:esp32s3:UploadSpeed=921600,USBMode=hwcdc,CDCOnBoot=cdc,MSCOnBoot=default,DFUOnBoot=default,UploadMode=default,CPUFreq=240,FlashMode=qio,FlashSize=4M,PartitionScheme=default_8MB,DebugLevel=none,PSRAM=disabled,LoopCore=1,EventsCore=1,EraseFlash=none,JTAGAdapter=default,ZigbeeMode=default",
+  "hardwareFolders": "/Users/joewilson/Library/Arduino15/packages",
+  "otherLibrariesFolders": "/Users/joewilson/Documents/Arduino/libraries",
+  "sketchLocation": "/Users/joewilson/Documents/Projects/Pet Feeder/Pet Feed - Dog Bowl/PetFeed-ESP-Code"
+}
